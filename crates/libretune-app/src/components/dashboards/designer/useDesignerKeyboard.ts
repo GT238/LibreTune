@@ -10,6 +10,14 @@ interface UseDesignerKeyboardArgs {
   onDeselect: () => void;
 }
 
+/** True while the user is typing into a form field, so designer shortcuts shouldn't fire. */
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
 /**
  * Window-level keyboard shortcuts for the dashboard designer.
  *  - Delete / Backspace: delete selected
@@ -17,6 +25,9 @@ interface UseDesignerKeyboardArgs {
  *  - Ctrl/Cmd+C / V: copy / paste
  *  - Ctrl/Cmd+S: save
  *  - Esc: clear selection
+ *
+ * Disabled while a form field (e.g. a property editor input) has focus, so
+ * e.g. Backspace-ing a position value doesn't delete the selected gauge.
  */
 export function useDesignerKeyboard({
   onDelete,
@@ -29,6 +40,8 @@ export function useDesignerKeyboard({
 }: UseDesignerKeyboardArgs): void {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         onDelete();
       } else if (e.ctrlKey || e.metaKey) {

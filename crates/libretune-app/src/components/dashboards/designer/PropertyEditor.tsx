@@ -1,4 +1,5 @@
 import { DashComponent, TsGaugeConfig, TsIndicatorConfig, isGauge, isIndicator } from '../dashTypes';
+import PercentField from './PercentField';
 
 interface Props {
   component: DashComponent;
@@ -142,44 +143,28 @@ export default function PropertyEditor({ component, onChange }: Props) {
         <div className="property-section">
           <h4>Position & Size</h4>
           <div className="property-row">
-            <div className="property-group half">
-              <label>X (%)</label>
-              <input
-                type="number"
-                step={0.01}
-                value={((gauge.relative_x ?? 0) * 100).toFixed(1)}
-                onChange={(e) => updateGauge({ relative_x: parseFloat(e.target.value) / 100 })}
-              />
-            </div>
-            <div className="property-group half">
-              <label>Y (%)</label>
-              <input
-                type="number"
-                step={0.01}
-                value={((gauge.relative_y ?? 0) * 100).toFixed(1)}
-                onChange={(e) => updateGauge({ relative_y: parseFloat(e.target.value) / 100 })}
-              />
-            </div>
+            <PercentField
+              label="X (%)"
+              value={gauge.relative_x ?? 0}
+              onChange={(v) => updateGauge({ relative_x: v })}
+            />
+            <PercentField
+              label="Y (%)"
+              value={gauge.relative_y ?? 0}
+              onChange={(v) => updateGauge({ relative_y: v })}
+            />
           </div>
           <div className="property-row">
-            <div className="property-group half">
-              <label>Width (%)</label>
-              <input
-                type="number"
-                step={0.01}
-                value={((gauge.relative_width ?? 0.25) * 100).toFixed(1)}
-                onChange={(e) => updateGauge({ relative_width: parseFloat(e.target.value) / 100 })}
-              />
-            </div>
-            <div className="property-group half">
-              <label>Height (%)</label>
-              <input
-                type="number"
-                step={0.01}
-                value={((gauge.relative_height ?? 0.25) * 100).toFixed(1)}
-                onChange={(e) => updateGauge({ relative_height: parseFloat(e.target.value) / 100 })}
-              />
-            </div>
+            <PercentField
+              label="Width (%)"
+              value={gauge.relative_width ?? 0.25}
+              onChange={(v) => updateGauge({ relative_width: v })}
+            />
+            <PercentField
+              label="Height (%)"
+              value={gauge.relative_height ?? 0.25}
+              onChange={(v) => updateGauge({ relative_height: v })}
+            />
           </div>
         </div>
 
@@ -292,44 +277,28 @@ export default function PropertyEditor({ component, onChange }: Props) {
         <div className="property-section">
           <h4>Position & Size</h4>
           <div className="property-row">
-            <div className="property-group half">
-              <label>X (%)</label>
-              <input
-                type="number"
-                step={0.01}
-                value={((indicator.relative_x ?? 0) * 100).toFixed(1)}
-                onChange={(e) => updateIndicator({ relative_x: parseFloat(e.target.value) / 100 })}
-              />
-            </div>
-            <div className="property-group half">
-              <label>Y (%)</label>
-              <input
-                type="number"
-                step={0.01}
-                value={((indicator.relative_y ?? 0) * 100).toFixed(1)}
-                onChange={(e) => updateIndicator({ relative_y: parseFloat(e.target.value) / 100 })}
-              />
-            </div>
+            <PercentField
+              label="X (%)"
+              value={indicator.relative_x ?? 0}
+              onChange={(v) => updateIndicator({ relative_x: v })}
+            />
+            <PercentField
+              label="Y (%)"
+              value={indicator.relative_y ?? 0}
+              onChange={(v) => updateIndicator({ relative_y: v })}
+            />
           </div>
           <div className="property-row">
-            <div className="property-group half">
-              <label>Width (%)</label>
-              <input
-                type="number"
-                step={0.01}
-                value={((indicator.relative_width ?? 0.1) * 100).toFixed(1)}
-                onChange={(e) => updateIndicator({ relative_width: parseFloat(e.target.value) / 100 })}
-              />
-            </div>
-            <div className="property-group half">
-              <label>Height (%)</label>
-              <input
-                type="number"
-                step={0.01}
-                value={((indicator.relative_height ?? 0.05) * 100).toFixed(1)}
-                onChange={(e) => updateIndicator({ relative_height: parseFloat(e.target.value) / 100 })}
-              />
-            </div>
+            <PercentField
+              label="Width (%)"
+              value={indicator.relative_width ?? 0.1}
+              onChange={(v) => updateIndicator({ relative_width: v })}
+            />
+            <PercentField
+              label="Height (%)"
+              value={indicator.relative_height ?? 0.05}
+              onChange={(v) => updateIndicator({ relative_height: v })}
+            />
           </div>
         </div>
       </div>
