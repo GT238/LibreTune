@@ -101,7 +101,12 @@
 .designer-content {
   display: flex;
   flex: 1;
-  overflow: hidden;
+  /* .designer-canvas below enforces a 400px min-height; if the toolbar and
+     window size leave less vertical room than that, this row must scroll
+     instead of silently clipping the bottom of the canvas (and any gauges
+     placed there) with no way to reach it. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* Canvas area */
@@ -455,11 +460,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Grid items default to min-width: auto, which lets content fight the
+     column's 1fr track and defeats this ellipsis. Force it to actually
+     shrink instead of overflowing the panel. */
+  min-width: 0;
 }
 .layer-row .layer-kind {
   font-size: 0.65rem;
   opacity: 0.55;
   font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 5.5em;
 }
 .layer-row button {
   background: transparent;
