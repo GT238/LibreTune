@@ -9,7 +9,13 @@
   height: 100%;
   background: var(--card-bg);
   border-radius: 8px;
-  overflow: hidden;
+  /* Designer mode renders directly inside this container (unlike the
+     regular dashboard view, which opts into .ts-dashboard-wrapper--scroll
+     itself when too big). Without a scroll fallback here, content taller
+     than the container — e.g. the Designer canvas's enforced min-height —
+     was clipped with no way to reach it. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .ts-dashboard-header {
@@ -238,19 +244,18 @@
   max-width: 100%;
 }
 
-/* Dashboard container - centers dashboard and handles scaling */
+/* Dashboard container - centers dashboard */
 .ts-dashboard-container {
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-/* Wrapper to center and scale the dashboard */
+/* Wrapper to center the dashboard */
 .ts-dashboard-container > .ts-dashboard {
   margin: 0 auto;
-  /* Scale down proportionally when container is too small */
-  object-fit: contain;
 }
 
 .ts-dashboard-loading,
