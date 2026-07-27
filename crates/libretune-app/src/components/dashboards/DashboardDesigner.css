@@ -12,6 +12,14 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Enforce the minimum on the whole designer (toolbar included) rather
+     than on .designer-canvas alone below — otherwise the toolbar's height
+     was added on top of the canvas's own floor, needing more room than
+     necessary, and shrinking the canvas to fit relies on a scroll fallback
+     that WebKitGTK (Linux) doesn't repaint correctly for this nested
+     flex/overflow structure (see .ts-dashboard-container). Confirmed by
+     HondaRulez on Linux: fits without scrolling in practice. */
+  min-height: 450px;
   background: var(--bg-primary);
 }
 
@@ -121,7 +129,10 @@
   position: relative;
   background: var(--canvas-bg);
   overflow: hidden;
-  min-height: 400px;
+  /* No floor here — .dashboard-designer above enforces the real minimum,
+     so this shrinks naturally with the available space instead of forcing
+     an overflow/scroll fallback. */
+  min-height: 0;
 }
 
 /* Grid overlay when enabled */
