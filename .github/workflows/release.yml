@@ -16,8 +16,8 @@ jobs:
     outputs:
       tag_name: ${{ steps.get_version.outputs.VERSION || 'manual' }}
     steps:
-      - uses: actions/checkout@v4
-      
+      - uses: actions/checkout@v5
+
       - name: Get version from tag
         id: get_version
         if: startsWith(github.ref, 'refs/tags/')
@@ -30,7 +30,7 @@ jobs:
     needs: create-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -47,9 +47,9 @@ jobs:
             libudev-dev
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: crates/libretune-app/package-lock.json
 
@@ -104,15 +104,15 @@ jobs:
     needs: create-release
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: crates/libretune-app/package-lock.json
 
@@ -164,15 +164,15 @@ jobs:
     needs: create-release
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: crates/libretune-app/package-lock.json
 
