@@ -24,6 +24,11 @@ relevant.
   ~13 B/s and froze the gauges. Auto mode now locks these ECUs to Burst; rusEFI /
   FOME / epicEFI retain the original OCH heuristics. Unknown ECU types also
   default to Burst for safety.
+- **Frontend Auto mode still forced OCH** — `App.tsx` preemptively converted
+  "Auto" to "ForceOCH" whenever the INI declared `ochBlockSize > 0`, bypassing
+  the backend's ECU-aware selection and re-creating the stall on Speeduino. Auto
+  is now passed through untouched so the backend can lock Speeduino/MS2/MS3 to
+  Burst.
 - **OCH fallback when `ochBlockSize` is unset** — `get_realtime_data` now falls
   back to Burst instead of guessing a 256-byte block when the INI declares no
   `ochBlockSize`, avoiding a mis-sized response that stalled the stream.
@@ -35,7 +40,10 @@ relevant.
   promptly. Added `ProtocolError::ConnectionClosed`.
 - **Line graph stopped scrolling on flat values** — `realtimeStore`'s history
   buffer skipped writing duplicate values, so a constant channel froze the trace.
-  It now appends every sample.
+  It now appends every sample. Additionally, `useGaugeRenderer` kept the rAF
+  loop idle once the animated value converged; LineGraph/Histogram/MultiChannelTrend
+  gauges now keep rendering at a throttled rate so the time-series trace keeps
+  scrolling on steady sources.
 - **Realtime stream not restarted after clear** — `useRealtimeStream`'s heartbeat
   only restarted the backend stream when `lastUpdateTime > 0`; it now also
   restarts when no update has been seen shortly after connect/clear.

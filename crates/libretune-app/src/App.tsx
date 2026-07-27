@@ -781,20 +781,12 @@ function AppContent() {
         : availablePorts[0];
 
       // Connect and get mismatch info directly (no async race)
-      let runtimeMode = connectionRuntimePacketMode || defaultRuntimePacketMode;
-
-      // If runtime mode is Auto, try to detect best mode from INI capabilities
-      if (runtimeMode === 'Auto') {
-        try {
-          // Attempt to query backend capabilities directly. If a definition isn't loaded
-          // the command will error and we'll fall back to a safe default.
-          const caps = await invoke<{ supports_och: boolean }>('get_protocol_capabilities');
-          runtimeMode = caps && caps.supports_och ? 'ForceOCH' : 'ForceBurst';
-        } catch (e) {
-          console.warn('Runtime mode auto-detect failed, defaulting to ForceBurst:', e);
-          runtimeMode = 'ForceBurst';
-        }
-      }
+      // Issue #71 follow-up: the backend's choose_runtime_command already
+      // implements ECU-aware Auto selection (Speeduino/MS2/MS3/Unknown stay on
+      // Burst; rusEFI/FOME/epicEFI use OCH heuristics). Preemptively forcing
+      // OCH here based only on INI och_block_size bypassed that safeguard and
+      // collapsed Speeduino throughput to ~14 B/s. Pass Auto through untouched.
+      const runtimeMode = connectionRuntimePacketMode || defaultRuntimePacketMode;
 
       const result = await invoke<ConnectResult>("connect_to_ecu", { 
         portName: portToUse, 

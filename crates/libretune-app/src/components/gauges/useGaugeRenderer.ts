@@ -53,6 +53,14 @@ export interface UseGaugeRendererOptions {
   enabled: boolean;
   /** Per-frame painter — called with the current display value. */
   paint: GaugePaintFn;
+  /**
+   * When true, the rAF loop keeps running at a throttled rate even after the
+   * animated value has converged. Required for time-series painters (LineGraph,
+   * Histogram, MultiChannelTrend) so the trace keeps scrolling when the channel
+   * value is steady — the underlying history buffer receives a new sample every
+   * tick, but the visual only updates if we keep repainting.
+   */
+  continuousRender?: boolean;
 }
 
 export interface UseGaugeRendererResult {
@@ -76,7 +84,7 @@ export interface UseGaugeRendererResult {
 }
 
 export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendererResult {
-  const { config, value, overrideStore, enabled, paint } = opts;
+  const { config, value, overrideStore, enabled, paint, continuousRender } = opts;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -250,8 +258,19 @@ export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendere
         peakValueRef.current = target;
       }
       const diff = target - displayValueRef.current;
+      const keepAlive = continuousRender && !overrideStoreRef.current && channel;
       if (Math.abs(diff) > epsilon) {
         displayValueRef.current = displayValueRef.current + diff * ANIMATION_LERP;
+        if (timestamp - lastDrawTimeRef.current >= DRAW_INTERVAL_MS) {
+          drawFrame();
+          lastDrawTimeRef.current = timestamp;
+        }
+        rafIdRef.current = requestAnimationFrame(animate);
+      } else if (keepAlive) {
+        // Time-series painters need continuous redraws so the trace scrolls
+        // even when the channel value is constant. Snap to target and throttle
+        // drawing to the configured frame interval to avoid burning CPU.
+        displayValueRef.current = target;
         if (timestamp - lastDrawTimeRef.current >= DRAW_INTERVAL_MS) {
           drawFrame();
           lastDrawTimeRef.current = timestamp;
@@ -314,6 +333,7 @@ export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendere
     config.max,
     config.peg_limits,
     config.antialiasing_on,
+    continuousRender,
   ]);
 
   return { canvasRef, displayValueRef, peakValueRef };

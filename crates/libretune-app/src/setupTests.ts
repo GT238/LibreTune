@@ -1,5 +1,21 @@
 import '@testing-library/jest-dom';
 
+// Provide a minimal localStorage stub for jsdom environments where it is missing.
+if (typeof globalThis.localStorage === 'undefined') {
+  const store: Record<string, string> = {};
+  globalThis.localStorage = {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => { store[key] = String(value); },
+    removeItem: (key: string) => { delete store[key]; },
+    clear: () => { Object.keys(store).forEach((k) => { delete store[k]; }); },
+    key: (index: number) => Object.keys(store)[index] ?? null,
+    length: 0,
+  } as Storage;
+  Object.defineProperty(globalThis.localStorage, 'length', {
+    get: () => Object.keys(store).length,
+  });
+}
+
 // Provide a minimal ResizeObserver stub for jsdom (not available in JSDOM)
 if (typeof globalThis.ResizeObserver === 'undefined') {
   globalThis.ResizeObserver = class ResizeObserver {

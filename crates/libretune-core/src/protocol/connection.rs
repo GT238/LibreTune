@@ -1326,7 +1326,16 @@ impl Connection {
 
         match choice {
             RuntimeFetch::Burst(cmd) => {
-                if self.use_modern_protocol {
+                // Issue #71 follow-up: Speeduino / MS2 / MS3 / Unknown must use the
+                // legacy raw-ASCII Burst path even if the handshake or INI somehow
+                // left use_modern_protocol enabled. These ECUs do not accept a
+                // CRC-framed Burst request. rusEFI/FOME/epicEFI keep CRC framing
+                // when modern protocol is active.
+                let force_raw_burst = matches!(
+                    self.ecu_type,
+                    EcuType::Speeduino | EcuType::MS2 | EcuType::MS3 | EcuType::Unknown
+                );
+                if self.use_modern_protocol && !force_raw_burst {
                     let expected_len = self
                         .protocol_settings
                         .as_ref()

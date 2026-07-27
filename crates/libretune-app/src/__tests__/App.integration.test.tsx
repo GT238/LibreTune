@@ -227,7 +227,7 @@ describe('App integration (toolbar connection-info)', () => {
     expect(screen.queryByText('INI Signature Mismatch')).toBeNull();
   });
 
-  it('auto-selects runtime packet mode (Auto → ForceOCH when INI supports OCH)', async () => {
+  it('passes Auto runtime packet mode through to the backend (Issue #71)', async () => {
     let connectArgs: any = null;
 
     (invoke as unknown as any).mockImplementation((cmd: string, args?: any) => {
@@ -239,7 +239,8 @@ describe('App integration (toolbar connection-info)', () => {
         case 'get_protocol_defaults':
           return Promise.resolve({ default_baud_rate: 115200, timeout_ms: 2000 });
         case 'get_protocol_capabilities':
-          // Simulate INI that supports OCH
+          // The frontend no longer consults this for Auto mode; the backend
+          // choose_runtime_command is ECU-aware and selects appropriately.
           return Promise.resolve({ supports_och: true });
         case 'connect_to_ecu':
           connectArgs = args;
@@ -281,9 +282,10 @@ describe('App integration (toolbar connection-info)', () => {
     const dialogConnect = await screen.findByText('Connect');
     dialogConnect.click();
 
-    // Wait for connect_to_ecu to be called and assert runtimePacketMode chosen
+    // Wait for connect_to_ecu to be called and assert Auto is left untouched
+    // so the backend's ECU-aware choose_runtime_command can decide.
     await waitFor(() => expect(connectArgs).not.toBeNull());
-    expect(connectArgs.runtimePacketMode).toBe('ForceOCH');
+    expect(connectArgs.runtimePacketMode).toBe('Auto');
 
   });
 });
