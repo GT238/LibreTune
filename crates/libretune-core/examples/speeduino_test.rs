@@ -157,6 +157,21 @@ fn main() {
         test_legacy_command(&mut port, b'S', "Signature (rusEFI)", timeout_ms);
     }
 
+    // Dynamic timing test — must run before the CRC section below. On
+    // firmware supporting msEnvelope, a single CRC-framed command switches
+    // the controller into that mode permanently until the next power
+    // cycle, so any later request using the legacy raw-ASCII commands this
+    // test relies on gets a framed reply back instead and fails.
+    if !fast_mode && test_legacy {
+        println!();
+        println!("═══════════════════════════════════════════════════════════════");
+        println!();
+        println!("⏱  Testing dynamic timing (finding minimum working delay)...");
+        println!();
+
+        test_dynamic_timing(&mut port, timeout_ms);
+    }
+
     // Test CRC protocol
     if test_crc {
         println!();
@@ -173,17 +188,6 @@ fn main() {
 
         // Test 'S' command with CRC wrapper
         test_crc_command(&mut port, &[b'S'], "Signature (CRC)", timeout_ms);
-    }
-
-    // Dynamic timing test
-    if !fast_mode && test_legacy {
-        println!();
-        println!("═══════════════════════════════════════════════════════════════");
-        println!();
-        println!("⏱  Testing dynamic timing (finding minimum working delay)...");
-        println!();
-
-        test_dynamic_timing(&mut port, timeout_ms);
     }
 
     println!();
