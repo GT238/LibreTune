@@ -47,6 +47,22 @@ relevant.
   `test_speeduino_force_och_override` (existing OCH-heuristic tests updated to
   pin `EcuType::RusEFI`).
 
+### 2026-07-27 — CI: drop deprecated Node.js 20 actions
+
+#### Fixed
+- **CI failing on the Node.js 20 deprecation** — GitHub Actions deprecated the
+  Node.js 20 runtime (the runner now force-migrates Node-20 actions to Node 24
+  and emits a warning that fails the check job). Bumped the affected first-party
+  actions from `@v4` (Node 20) to `@v5` (Node 24) across `ci.yml`, `nightly.yml`,
+  and `release.yml`: `actions/checkout`, `actions/cache`, `actions/setup-node`.
+  See
+  https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+
+#### Changed
+- **Frontend build Node version aligned to 24** — the `setup-node` `node-version`
+  in all workflows is now `'24'` (current LTS), replacing `'22'`, so the runner
+  Node and the action runtime match.
+
 ### 2026-07-23 — Safe project→ECU tune apply (no reconnect brick)
 
 #### Fixed
