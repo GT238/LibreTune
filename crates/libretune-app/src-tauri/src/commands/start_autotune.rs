@@ -9,6 +9,7 @@ use libretune_core::ini::{Constant, EcuDefinition};
 use libretune_core::tune::TuneCache;
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn start_autotune(
     state: tauri::State<'_, AppState>,
     table_name: String,
