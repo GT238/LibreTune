@@ -48,6 +48,28 @@ Common problems and solutions.
 4. Check for electrical noise sources
 5. Try different USB port
 
+### Gauges Stall / Invalid Values / Slow Data
+
+**Symptoms**: Gauges freeze or show no changes; Rx rate is very low in Auto mode
+(e.g. ~13 B/sec where Force Burst gives ~1 KB/sec); the Disconnect button does
+nothing; opening a table stays on "Loading…"; the line graph stops scrolling
+until the value changes.
+
+**Solutions**:
+1. Set **Runtime Packet Mode** to **Force Burst** (Settings dialog). For
+   Speeduino / MegaSquirt (MS2/MS3), Burst is the high-throughput realtime path;
+   Auto mode now selects it automatically, but forcing it rules out any
+   mis-detection.
+2. If gauges still stall, click **Disconnect** and reconnect. Disconnect now
+   aborts in-flight serial reads instead of hanging.
+3. Verify the loaded INI matches your firmware version (a signature mismatch can
+   mis-size the realtime block).
+4. Check the baud rate matches your ECU (Speeduino / rusEFI / epicEFI / MS2 / MS3
+   all default to 115200).
+5. For Bluetooth or low-baud links, **Force OCH** may be more efficient on
+   rusEFI-family ECUs — but avoid it on Speeduino/MS unless you know your firmware
+   supports it.
+
 ## Table Editing Issues
 
 ### Values Not Saving

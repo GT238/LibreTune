@@ -13,7 +13,9 @@ use super::{
     serial::{clear_buffers, configure_port, list_ports, open_port, PortInfo},
     Command, CommandBuilder, Packet, ProtocolError, DEFAULT_BAUD_RATE, DEFAULT_TIMEOUT_MS,
 };
-use crate::ini::{AdaptiveTiming, AdaptiveTimingConfig, Endianness, ProtocolSettings};
+use crate::ini::{AdaptiveTiming, AdaptiveTimingConfig, EcuType, Endianness, ProtocolSettings};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Parse a command string with escape sequences into raw bytes
 /// Handles: \xNN (hex), \n, \r, \t, \\, \0, and regular characters
@@ -324,6 +326,13 @@ pub struct Connection {
     /// Page targeted by the most recent successful write, used by the auto-burn-on-page-change
     /// safety policy (msEnvelope_1.0 spec §6.2). `None` after construction or after a burn.
     last_written_page: Option<u8>,
+    /// ECU type detected from the INI signature (Issue #71).
+    /// Drives conservative runtime-command selection for Speeduino/MS2/MS3.
+    ecu_type: EcuType,
+    /// Cancellation flag shared with the owner (Tauri AppState). When set, all
+    /// blocking I/O polling loops abort early so `disconnect()` can complete even
+    /// while another thread is mid-read (Issue #71: "disconnect does nothing").
+    cancel: Arc<AtomicBool>,
 }
 
 impl Connection {
@@ -346,6 +355,8 @@ impl Connection {
             tx_packets: 0,
             rx_packets: 0,
             last_written_page: None,
+            ecu_type: EcuType::Unknown,
+            cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -377,6 +388,8 @@ impl Connection {
             tx_packets: 0,
             rx_packets: 0,
             last_written_page: None,
+            ecu_type: EcuType::Unknown,
+            cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -387,6 +400,30 @@ impl Connection {
         self.command_builder = CommandBuilder::new(endianness == Endianness::Little);
         self.endianness = endianness;
         self.protocol_settings = Some(protocol);
+    }
+
+    /// Set the detected ECU type (called after the INI is loaded, Issue #71).
+    /// Drives conservative runtime-command selection for Speeduino/MS2/MS3.
+    pub fn set_ecu_type(&mut self, ecu_type: EcuType) {
+        self.ecu_type = ecu_type;
+    }
+
+    /// Get the detected ECU type.
+    pub fn ecu_type(&self) -> EcuType {
+        self.ecu_type
+    }
+
+    /// Get a clone of the cancellation handle. The owner (e.g. Tauri AppState)
+    /// can call `request_cancel()` on its clone to interrupt in-flight blocking
+    /// I/O so `disconnect()` is not blocked by a streaming task mid-read.
+    pub fn cancel_handle(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancel)
+    }
+
+    /// Request cancellation of any in-flight blocking I/O. Safe to call from a
+    /// different thread than the one performing the read (Issue #71).
+    pub fn request_cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
     }
 
     /// Get cumulative tx/rx bytes and packet counters
@@ -590,10 +627,18 @@ impl Connection {
     }
 
     /// Disconnect from the ECU
+    ///
+    /// Sets the cancellation flag first so any blocking I/O polling loop running
+    /// in another thread (e.g. the realtime stream task) aborts its current
+    /// read promptly instead of waiting for the full timeout (Issue #71).
     pub fn disconnect(&mut self) {
+        // Signal in-flight blocking reads to abort.
+        self.cancel.store(true, Ordering::Relaxed);
         self.channel = None;
         self.signature = None;
         self.state = ConnectionState::Disconnected;
+        // Reset the flag so a reconnect starts clean.
+        self.cancel.store(false, Ordering::Relaxed);
     }
 
     /// Perform handshake and get ECU signature
@@ -732,6 +777,9 @@ impl Connection {
         } else {
             2
         };
+        // Clone the cancel handle before borrowing the channel so the cancel check
+        // in the read loop does not conflict with the mutable channel borrow.
+        let cancel = Arc::clone(&self.cancel);
 
         let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
 
@@ -770,6 +818,14 @@ impl Connection {
             if start.elapsed() > timeout {
                 eprintln!("[DEBUG] send_raw_command: overall timeout reached");
                 break;
+            }
+
+            // Cancellation check (Issue #71): abort promptly if disconnect() was called
+            // while this blocking read is in flight.
+            if cancel.load(Ordering::Relaxed) {
+                eprintln!("[DEBUG] send_raw_command: cancelled by disconnect");
+                self.reset_adaptive_timing_on_error();
+                return Err(ProtocolError::ConnectionClosed);
             }
 
             // Check how many bytes are available without blocking
@@ -963,6 +1019,9 @@ impl Connection {
         } else {
             2
         };
+        // Clone the cancel handle before borrowing the channel so the disjoint
+        // borrow of self.cancel does not conflict with the mutable channel borrow.
+        let cancel = Arc::clone(&self.cancel);
 
         let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
 
@@ -989,6 +1048,7 @@ impl Connection {
             buf: &mut [u8],
             timeout: Duration,
             poll_ms: u64,
+            cancel: &AtomicBool,
         ) -> Result<(), ProtocolError> {
             let start = Instant::now();
             let mut offset = 0;
@@ -1001,6 +1061,12 @@ impl Connection {
                         buf.len()
                     );
                     return Err(ProtocolError::Timeout);
+                }
+
+                // Cancellation check (Issue #71): abort promptly if disconnect() was called.
+                if cancel.load(Ordering::Relaxed) {
+                    eprintln!("[DEBUG] read_exact_timeout: cancelled by disconnect");
+                    return Err(ProtocolError::ConnectionClosed);
                 }
 
                 // Check how many bytes are available
@@ -1042,7 +1108,8 @@ impl Connection {
 
         // Read response header (2 bytes for length)
         let mut header = [0u8; 2];
-        if let Err(e) = read_exact_timeout(channel, &mut header, timeout, poll_interval_ms) {
+        if let Err(e) = read_exact_timeout(channel, &mut header, timeout, poll_interval_ms, &cancel)
+        {
             // Drain any buffered bytes first (uses channel borrow), then reset timing
             let _ = channel.clear_input_buffer();
             self.reset_adaptive_timing_on_error();
@@ -1062,8 +1129,13 @@ impl Connection {
 
         // Read payload + CRC
         let mut payload_and_crc = vec![0u8; length + 4];
-        if let Err(e) = read_exact_timeout(channel, &mut payload_and_crc, timeout, poll_interval_ms)
-        {
+        if let Err(e) = read_exact_timeout(
+            channel,
+            &mut payload_and_crc,
+            timeout,
+            poll_interval_ms,
+            &cancel,
+        ) {
             // Drain the rest of the packet body (uses channel borrow), then reset timing
             drain_input_with_timeout(
                 channel,
@@ -1095,6 +1167,17 @@ impl Connection {
     }
 
     /// Decide which runtime fetch command to use (Burst vs OCH)
+    /// Decide which runtime fetch command to use (Burst vs OCH)
+    ///
+    /// **Issue #71 fix**: For Speeduino / MegaSquirt (MS2/MS3), the Burst ('A')
+    /// command is the well-tested, high-throughput path (observed ~1 KB/sec).
+    /// Auto mode previously could silently switch to OCH based on loose
+    /// heuristics (maxUnusedRuntimeRange, slow-link, adaptive-timing averages),
+    /// collapsing throughput to ~13 B/sec and stalling gauges. These ECUs now
+    /// stay on Burst unless the user explicitly forces OCH.
+    ///
+    /// For rusEFI / FOME / epicEFI (little-endian, msEnvelope_1.0), OCH is the
+    /// standard modern realtime path, so the existing heuristics are retained.
     pub fn choose_runtime_command(&self) -> (RuntimeFetch, String) {
         // Respect explicit overrides
         let forced = self.config.runtime_packet_mode;
@@ -1131,7 +1214,29 @@ impl Connection {
             );
         }
 
-        // Auto heuristics
+        // === Auto mode ===
+        //
+        // For Speeduino / MS2 / MS3 (big-endian, classic MegaSquirt lineage),
+        // Burst ('A') is the canonical high-throughput realtime path. The OCH
+        // heuristics below were observed to mis-select OCH on real Speeduino
+        // 202501 hardware, dropping throughput from ~1 KB/sec to ~13 B/sec
+        // (Issue #71). Lock these ECUs to Burst in Auto mode.
+        let burst_ecu = matches!(
+            self.ecu_type,
+            EcuType::Speeduino | EcuType::MS2 | EcuType::MS3 | EcuType::Unknown
+        );
+
+        // Unknown ECU type: also default to Burst to be safe. Only rusEFI-lineage
+        // ECUs (detected from the INI signature) are allowed to auto-select OCH.
+        if burst_ecu {
+            return (
+                RuntimeFetch::Burst(burst_cmd),
+                format!("auto: Burst (ecu={})", self.ecu_type.display_name()),
+            );
+        }
+
+        // rusEFI / FOME / epicEFI: apply the original heuristics to choose OCH.
+
         // 1) INI hint: maxUnusedRuntimeRange > 0 => prefer OCH if available
         if let Some(p) = &self.protocol_settings {
             if p.max_unused_runtime_range > 0 {
@@ -1189,6 +1294,35 @@ impl Connection {
     /// Get real-time data from ECU
     pub fn get_realtime_data(&mut self) -> Result<Vec<u8>, ProtocolError> {
         let (choice, _reason) = self.choose_runtime_command();
+
+        // Safety net (Issue #71): if Auto/forced OCH was selected but the INI
+        // did not declare a valid och_block_size, the OCH command cannot be
+        // framed correctly and the ECU will return a mis-sized response that
+        // stalls the stream. Fall back to Burst instead of guessing 256 bytes.
+        let choice = match &choice {
+            RuntimeFetch::OCH(_) => {
+                let och_block_size = self
+                    .protocol_settings
+                    .as_ref()
+                    .map(|p| p.och_block_size)
+                    .unwrap_or(0);
+                if och_block_size == 0 {
+                    eprintln!(
+                        "[WARN] get_realtime_data: OCH selected but och_block_size=0, \
+                         falling back to Burst to avoid stream stall (Issue #71)"
+                    );
+                    let burst_cmd = self
+                        .protocol_settings
+                        .as_ref()
+                        .and_then(|p| p.burst_get_command.clone())
+                        .unwrap_or_else(|| "A".to_string());
+                    RuntimeFetch::Burst(burst_cmd)
+                } else {
+                    choice
+                }
+            }
+            _ => choice,
+        };
 
         match choice {
             RuntimeFetch::Burst(cmd) => {
@@ -2208,9 +2342,12 @@ mod tests {
 
     #[test]
     fn test_choose_runtime_command_rfcomm() {
+        // rusEFI keeps the slow-link heuristic (Issue #71: Speeduino/Unknown now
+        // stay on Burst regardless of link speed).
         let mut cfg = ConnectionConfig::default();
         cfg.port_name = "rfcomm0".to_string();
         let mut conn = Connection::new(cfg);
+        conn.set_ecu_type(EcuType::RusEFI);
         let mut proto = ProtocolSettings::default();
         proto.och_get_command = Some("O".to_string());
         proto.burst_get_command = Some("A".to_string());
@@ -2226,6 +2363,66 @@ mod tests {
                 || reason.contains("slow")
                 || reason.contains("adaptive")
         );
+    }
+
+    /// Issue #71: Speeduino (and MS2/MS3/Unknown) must stay on Burst in Auto mode
+    /// even when the INI declares maxUnusedRuntimeRange, a slow link, or slow
+    /// adaptive-timing averages — these heuristics previously collapsed
+    /// throughput to ~13 B/sec on real Speeduino 202501 hardware.
+    #[test]
+    fn test_speeduino_auto_stays_on_burst() {
+        for ecu in [
+            EcuType::Speeduino,
+            EcuType::MS2,
+            EcuType::MS3,
+            EcuType::Unknown,
+        ] {
+            // Slow link (rfcomm) + INI hint + slow adaptive timing all set.
+            let mut cfg = ConnectionConfig::default();
+            cfg.port_name = "rfcomm0".to_string();
+            let mut conn = Connection::new(cfg);
+            conn.set_ecu_type(ecu);
+            let mut proto = ProtocolSettings::default();
+            proto.och_get_command = Some("O".to_string());
+            proto.burst_get_command = Some("A".to_string());
+            proto.max_unused_runtime_range = 999; // would normally trigger OCH
+            conn.set_protocol(proto, Endianness::Big);
+            // Slow adaptive timing average that would normally trigger OCH.
+            conn.enable_adaptive_timing(None);
+            conn.record_response_time(std::time::Duration::from_millis(200));
+            conn.record_response_time(std::time::Duration::from_millis(180));
+
+            let (choice, reason) = conn.choose_runtime_command();
+            match &choice {
+                RuntimeFetch::Burst(cmd) => assert_eq!(cmd, "A"),
+                _ => panic!("{:?} should use Burst in Auto, got {:?}", ecu, choice),
+            }
+            assert!(
+                reason.contains("Burst"),
+                "unexpected reason for {:?}: {}",
+                ecu,
+                reason
+            );
+        }
+    }
+
+    /// Issue #71: ForceOCH must still override the Speeduino Burst default so the
+    /// user can manually select OCH when appropriate.
+    #[test]
+    fn test_speeduino_force_och_override() {
+        let mut cfg = ConnectionConfig::default();
+        cfg.runtime_packet_mode = RuntimePacketMode::ForceOCH;
+        let mut conn = Connection::new(cfg);
+        conn.set_ecu_type(EcuType::Speeduino);
+        let mut proto = ProtocolSettings::default();
+        proto.och_get_command = Some("O".to_string());
+        proto.burst_get_command = Some("A".to_string());
+        conn.set_protocol(proto, Endianness::Big);
+        let (choice, _) = conn.choose_runtime_command();
+        match choice {
+            RuntimeFetch::OCH(cmd) => assert_eq!(cmd, "O"),
+            _ => panic!("ForceOCH should override Speeduino Burst default"),
+        }
     }
 
     #[test]
@@ -2255,8 +2452,10 @@ mod tests {
 
     #[test]
     fn test_adaptive_switch_to_och() {
+        // rusEFI keeps the adaptive-timing heuristic (Issue #71).
         let cfg = ConnectionConfig::default();
         let mut conn = Connection::new(cfg);
+        conn.set_ecu_type(EcuType::RusEFI);
         let mut proto = ProtocolSettings::default();
         proto.och_get_command = Some("O".to_string());
         proto.burst_get_command = Some("A".to_string());

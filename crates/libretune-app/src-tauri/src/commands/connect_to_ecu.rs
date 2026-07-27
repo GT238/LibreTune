@@ -67,6 +67,12 @@ pub async fn connect_to_ecu(
     let def_guard = state.definition.lock().await;
     let protocol_settings = def_guard.as_ref().map(|d| d.protocol.clone());
     let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or_default();
+    // ECU type drives conservative runtime-command selection (Issue #71):
+    // Speeduino/MS2/MS3 stay on Burst in Auto mode to avoid throughput collapse.
+    let ecu_type = def_guard
+        .as_ref()
+        .map(|d| d.ecu_type)
+        .unwrap_or(libretune_core::ini::EcuType::Unknown);
     let expected_signature = def_guard.as_ref().map(|d| d.signature.clone());
     let expected_prefix = def_guard.as_ref().and_then(|d| d.signature_prefix.clone());
     drop(def_guard);
@@ -103,9 +109,14 @@ pub async fn connect_to_ecu(
 
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut conn = if let Some(protocol) = protocol_settings {
-                Connection::with_protocol(config, protocol, endianness)
+                let mut c = Connection::with_protocol(config, protocol, endianness);
+                // Apply detected ECU type so runtime-command selection is ECU-aware.
+                c.set_ecu_type(ecu_type);
+                c
             } else {
-                Connection::new(config)
+                let mut c = Connection::new(config);
+                c.set_ecu_type(ecu_type);
+                c
             };
 
             match conn.connect() {

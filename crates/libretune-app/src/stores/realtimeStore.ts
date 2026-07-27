@@ -91,17 +91,16 @@ export const useRealtimeStore = create<RealtimeState>()(
           }
         }
 
+        // Issue #71: always append the latest sample to the history buffer so that
+        // time-series line graphs keep scrolling even when a channel's value is
+        // constant. Previously, identical consecutive values were coalesced, which
+        // froze the trace until the next change. The buffer is a fixed-size
+        // Float64Array (no per-sample allocation), so writing every tick is cheap.
         for (const [name, value] of Object.entries(data)) {
           let buf = _channelHistoryBuffer[name];
           if (!buf) {
             buf = { data: new Float64Array(HISTORY_SIZE), writeIdx: 0, count: 0 };
             _channelHistoryBuffer[name] = buf;
-          }
-          if (buf.count > 0) {
-            const lastIdx = (buf.writeIdx - 1 + HISTORY_SIZE) % HISTORY_SIZE;
-            if (buf.data[lastIdx] === value) {
-              continue;
-            }
           }
           buf.data[buf.writeIdx] = value;
           buf.writeIdx = (buf.writeIdx + 1) % HISTORY_SIZE;

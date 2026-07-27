@@ -17,6 +17,11 @@ pub enum ProtocolError {
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
 
+    /// Connection was closed/cancelled mid-operation (e.g. user-initiated disconnect
+    /// interrupted a blocking read). Used by the cancellation mechanism (Issue #71).
+    #[error("Connection closed")]
+    ConnectionClosed,
+
     #[error("Already connected")]
     AlreadyConnected,
 
