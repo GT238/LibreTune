@@ -57,12 +57,20 @@ export function useRealtimeStream(
         }
 
         let lastRestartTime = 0;
+        let streamStartedAt = Date.now();
         heartbeatHandle = setInterval(() => {
           if (cancelled) return;
           const lastUpdate = useRealtimeStore.getState().lastUpdateTime;
           const now = Date.now();
-          if (lastUpdate > 0 && now - lastUpdate > 2000 && now - lastRestartTime > 10000) {
+          // Issue #71: restart the backend stream if no realtime update has been
+          // observed for 2s. We treat lastUpdateTime === 0 (e.g. right after
+          // clearChannels or a fresh connect) as "no update yet" so the heartbeat
+          // still kicks the backend, rather than silently waiting forever.
+          const stalledSinceStart = lastUpdate === 0 && now - streamStartedAt > 2000;
+          const stalledAfterData = lastUpdate > 0 && now - lastUpdate > 2000;
+          if ((stalledSinceStart || stalledAfterData) && now - lastRestartTime > 10000) {
             lastRestartTime = now;
+            streamStartedAt = now;
             invoke("start_realtime_stream", { intervalMs: 50 }).catch(() => {});
           }
         }, 2000);

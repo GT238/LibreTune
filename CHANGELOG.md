@@ -13,6 +13,40 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-07-27 — Fix ECU communication stalls (Issue #71)
+
+#### Fixed
+- **Realtime data stalls in Auto mode** — `choose_runtime_command`
+  (`libretune-core/src/protocol/connection.rs`) no longer silently switches
+  Speeduino / MegaSquirt (MS2/MS3) from Burst (`A`, ~1 KB/s) to OCH based on
+  loose heuristics (`maxUnusedRuntimeRange`, slow-link baud/port, adaptive-timing
+  averages). On real Speeduino 202501 hardware this collapsed throughput to
+  ~13 B/s and froze the gauges. Auto mode now locks these ECUs to Burst; rusEFI /
+  FOME / epicEFI retain the original OCH heuristics. Unknown ECU types also
+  default to Burst for safety.
+- **OCH fallback when `ochBlockSize` is unset** — `get_realtime_data` now falls
+  back to Burst instead of guessing a 256-byte block when the INI declares no
+  `ochBlockSize`, avoiding a mis-sized response that stalled the stream.
+- **Disconnect did nothing while streaming** — the realtime stream task holds the
+  connection mutex during blocking serial I/O, so `disconnect_ecu`'s
+  `lock().await` could hang. Disconnect now polls the lock with a deadline, and
+  `Connection::disconnect()` sets a cancellation flag checked by the blocking
+  read loops (`send_raw_command`, `send_packet`) so an in-flight read aborts
+  promptly. Added `ProtocolError::ConnectionClosed`.
+- **Line graph stopped scrolling on flat values** — `realtimeStore`'s history
+  buffer skipped writing duplicate values, so a constant channel froze the trace.
+  It now appends every sample.
+- **Realtime stream not restarted after clear** — `useRealtimeStream`'s heartbeat
+  only restarted the backend stream when `lastUpdateTime > 0`; it now also
+  restarts when no update has been seen shortly after connect/clear.
+
+#### Added
+- `Connection::ecu_type()` / `set_ecu_type()` / `cancel_handle()` /
+  `request_cancel()` for ECU-aware runtime selection and interruptible I/O.
+- Tests: `test_speeduino_auto_stays_on_burst`,
+  `test_speeduino_force_och_override` (existing OCH-heuristic tests updated to
+  pin `EcuType::RusEFI`).
+
 ### 2026-07-23 — Safe project→ECU tune apply (no reconnect brick)
 
 #### Fixed
