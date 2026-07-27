@@ -101,6 +101,12 @@
 .designer-content {
   display: flex;
   flex: 1;
+  /* Flex items default to min-height: auto, which on some engines (notably
+     WebKitGTK, used on Linux) refuses to shrink this item below its
+     content's natural height — silently defeating the overflow-y: auto
+     below. Chromium/WebView2 (Windows) tends to tolerate this; WebKitGTK
+     does not. Force it explicitly so scrolling actually engages everywhere. */
+  min-height: 0;
   /* .designer-canvas below enforces a 400px min-height; if the toolbar and
      window size leave less vertical room than that, this row must scroll
      instead of silently clipping the bottom of the canvas (and any gauges
