@@ -13,7 +13,7 @@ use super::{
     serial::{clear_buffers, configure_port, list_ports, open_port, PortInfo},
     Command, CommandBuilder, Packet, ProtocolError, DEFAULT_BAUD_RATE, DEFAULT_TIMEOUT_MS,
 };
-use crate::ini::{AdaptiveTiming, AdaptiveTimingConfig, Endianness, EcuType, ProtocolSettings};
+use crate::ini::{AdaptiveTiming, AdaptiveTimingConfig, EcuType, Endianness, ProtocolSettings};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -1108,8 +1108,7 @@ impl Connection {
 
         // Read response header (2 bytes for length)
         let mut header = [0u8; 2];
-        if let Err(e) =
-            read_exact_timeout(channel, &mut header, timeout, poll_interval_ms, &cancel)
+        if let Err(e) = read_exact_timeout(channel, &mut header, timeout, poll_interval_ms, &cancel)
         {
             // Drain any buffered bytes first (uses channel borrow), then reset timing
             let _ = channel.clear_input_buffer();
