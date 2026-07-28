@@ -29,12 +29,14 @@ interface TsGaugeProps {
   legacyMode?: boolean;
   /** When true, the value prop takes priority over the store subscription (sweep/demo mode) */
   overrideStore?: boolean;
+  /** Whether the ECU/stream is connected. Time-series painters only continuous-render while connected. */
+  isConnected?: boolean;
 }
 
 /**
  * Internal TsGauge component - wrapped in React.memo below
  */
-function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overrideStore = false }: TsGaugeProps) {
+function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overrideStore = false, isConnected = false }: TsGaugeProps) {
   const [fontsReady, setFontsReady] = useState(false);
   const [imagesReady, setImagesReady] = useState(false);
 
@@ -213,8 +215,9 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overr
   );
 
   // Time-series painters must keep repainting so the trace scrolls left even
-  // when the channel value is constant (Issue #71).
-  const continuousRender = ['LineGraph', 'Histogram', 'MultiChannelTrend'].includes(
+  // when the channel value is constant (Issue #71). Only enable this while the
+  // ECU/stream is connected; disconnected gauges should be still (Issue #83).
+  const continuousRender = isConnected && ['LineGraph', 'Histogram', 'MultiChannelTrend'].includes(
     config.gauge_painter,
   );
 
@@ -254,7 +257,8 @@ const TsGauge = React.memo(TsGaugeInner, (prevProps, nextProps) => {
     prevProps.config === nextProps.config &&
     prevProps.embeddedImages === nextProps.embeddedImages &&
     prevProps.legacyMode === nextProps.legacyMode &&
-    prevProps.overrideStore === nextProps.overrideStore
+    prevProps.overrideStore === nextProps.overrideStore &&
+    prevProps.isConnected === nextProps.isConnected
   );
 });
 

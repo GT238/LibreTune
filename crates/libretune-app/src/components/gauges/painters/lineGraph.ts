@@ -77,17 +77,16 @@ export const lineGraphPainter: Painter = (pctx) => {
       });
     }
   } else {
-    // No history available - show simulated data for demo
+    // No history available — render a flat line at the current/default value
+    // so disconnected gauges are steady instead of showing a random waving trace
+    // (Issue #83). The deterministic shape gives immediate visual feedback while
+    // still resembling a line graph.
     const numPoints = 50;
     const valuePercent = (value - config.min) / (config.max - config.min);
+    const clampedPercent = Math.max(0, Math.min(1, valuePercent));
 
     for (let i = 0; i < numPoints; i++) {
       const t = i / (numPoints - 1);
-      // Simulate some variation leading up to current value
-      const noise = Math.sin(t * 20) * 0.05 + Math.sin(t * 7) * 0.03;
-      const historicalPercent = valuePercent + (1 - t) * (Math.random() * 0.2 - 0.1) + noise * (1 - t);
-      const clampedPercent = Math.max(0, Math.min(1, historicalPercent));
-
       points.push({
         x: padding + t * graphWidth,
         y: graphY + graphHeight - clampedPercent * graphHeight,

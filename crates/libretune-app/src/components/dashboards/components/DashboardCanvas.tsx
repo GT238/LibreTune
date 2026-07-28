@@ -33,6 +33,7 @@ interface Props {
   sweepValues: Record<string, number>;
   gaugeDemoActive: boolean;
   demoValues: Record<string, number>;
+  isConnected: boolean;
   wrapperRef: React.RefObject<HTMLDivElement>;
   onContextMenu: (e: React.MouseEvent, gaugeId: string | null) => void;
 }
@@ -60,6 +61,7 @@ export default function DashboardCanvas({
   sweepValues,
   gaugeDemoActive,
   demoValues,
+  isConnected,
   wrapperRef,
   onContextMenu,
 }: Props) {
@@ -183,6 +185,7 @@ export default function DashboardCanvas({
                     embeddedImages={embeddedImages}
                     legacyMode={legacyMode}
                     overrideStore={sweepActive || gaugeDemoActive}
+                    isConnected={isConnected}
                   />
                 </div>
               </ConditionalWrapper>
@@ -225,6 +228,7 @@ export default function DashboardCanvas({
             sweepValues={sweepValues}
             gaugeDemoActive={gaugeDemoActive}
             demoValues={demoValues}
+            isConnected={isConnected}
             onContextMenu={onContextMenu}
           />
         ))}
@@ -256,6 +260,7 @@ function ExtraClusterLayer({
   sweepValues,
   gaugeDemoActive,
   demoValues,
+  isConnected,
   onContextMenu,
 }: {
   cluster: GaugeCluster;
@@ -266,6 +271,7 @@ function ExtraClusterLayer({
   sweepValues: Record<string, number>;
   gaugeDemoActive: boolean;
   demoValues: Record<string, number>;
+  isConnected: boolean;
   onContextMenu: (e: React.MouseEvent, gaugeId: string | null) => void;
 }) {
   const visible = useEnabledCondition(cluster.enabled_condition ?? null);
@@ -301,6 +307,7 @@ function ExtraClusterLayer({
                   embeddedImages={embeddedImages}
                   legacyMode={legacyMode}
                   overrideStore={sweepActive || gaugeDemoActive}
+                  isConnected={isConnected}
                 />
               </div>
             </ConditionalWrapper>
