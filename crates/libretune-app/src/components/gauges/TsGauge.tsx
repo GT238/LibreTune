@@ -212,12 +212,19 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overr
     [config, legacyMode, getEmbeddedImage, getValueColor, getFontSpec, getFontFamily],
   );
 
+  // Time-series painters must keep repainting so the trace scrolls left even
+  // when the channel value is constant (Issue #71).
+  const continuousRender = ['LineGraph', 'Histogram', 'MultiChannelTrend'].includes(
+    config.gauge_painter,
+  );
+
   const { canvasRef, displayValueRef } = useGaugeRenderer({
     config,
     value,
     overrideStore,
     enabled: fontsReady && imagesReady,
     paint,
+    continuousRender,
   });
 
   return (
