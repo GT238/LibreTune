@@ -12,6 +12,11 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Enforce the minimum size on the whole component (toolbar + canvas) rather
+     than on the canvas alone. This prevents the canvas from stacking its own
+     minimum height on top of the toolbar and overflowing the designer area on
+     small viewports / Linux (Issue #70). */
+  min-height: 450px;
   background: var(--bg-primary);
 }
 
@@ -101,18 +106,12 @@
 .designer-content {
   display: flex;
   flex: 1;
-  /* Flex items default to min-height: auto, which on some engines (notably
-     WebKitGTK, used on Linux) refuses to shrink this item below its
-     content's natural height — silently defeating the overflow-y: auto
-     below. Chromium/WebView2 (Windows) tends to tolerate this; WebKitGTK
-     does not. Force it explicitly so scrolling actually engages everywhere. */
+  /* The whole .dashboard-designer enforces the minimum height, so the content
+     row can fill the remaining space without scrollbars. This avoids a
+     WebKitGTK rendering issue where scrollTop changes in nested flex/overflow
+     structures were not repainted (Issue #70). */
   min-height: 0;
-  /* .designer-canvas below enforces a 400px min-height; if the toolbar and
-     window size leave less vertical room than that, this row must scroll
-     instead of silently clipping the bottom of the canvas (and any gauges
-     placed there) with no way to reach it. */
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 /* Canvas area */
@@ -121,7 +120,10 @@
   position: relative;
   background: var(--canvas-bg);
   overflow: hidden;
-  min-height: 400px;
+  /* Let the canvas shrink freely; the parent .dashboard-designer now owns the
+     minimum height (toolbar included). Prevents the canvas floor from being
+     added on top of the toolbar and overflowing the designer (Issue #70). */
+  min-height: 0;
 }
 
 /* Grid overlay when enabled */
