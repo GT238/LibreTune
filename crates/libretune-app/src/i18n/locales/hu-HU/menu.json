@@ -1,0 +1,54 @@
+{
+  "file": {
+    "title": "&File",
+    "newProject": "Új Projekt…",
+    "importProject": "TS Projekt betöltése…",
+    "closeProject": "Projekt bezárása",
+    "saveTune": "Tune mentése",
+    "saveTuneAs": "Tune mentése másként…",
+    "loadTune": "Tune betöltése…",
+    "createRestorePoint": "Visszaállítási pont létrehozása",
+    "restorePoints": "Visszaállítási pontok…",
+    "tuneHistory": "Tune történet…",
+    "burnToEcu": "Írás az ECU-ba",
+    "exit": "Kilépés",
+    "settings": "Beállítások…"
+  },
+  "edit": {
+    "title": "Szerkeszt",
+    "undo": "Visszaállít",
+    "redo": "Újra végrehajt",
+    "cut": "Kivág",
+    "copy": "Másol",
+    "paste": "Beilleszt",
+    "resetToDefaults": "Alapértelmezesek beállitása"
+  },
+  "view": {
+    "title": "Nézet",
+    "dashboard": "Müszerfal",
+    "toggleSidebar": "Oldal menü mutat/rejt",
+    "theme": "Témák"
+  },
+  "tools": {
+    "title": "Eszközök",
+    "autotune": "AutoTune",
+    "dataLogging": "Élő adat",
+    "outputChannelStatus": "Kimenetek állapota",
+    "toothLogger": "Jeladó loggolás",
+    "compositeLogger": "Összetett loggolás",
+    "ecuConsole": "ECU parancs konzol",
+    "tableCompare": "Tábla összehasonlítás",
+    "tuneFileDiff": "Tune file külömbség…",
+    "dynoData": "Dyno adatok…",
+    "mathChannels": "Számolt adat csatornák…",
+    "generateBaseMap": "Generate Base Map…",
+    "plugins": "Pluginek…",
+    "ecuConnection": "ECU kapcsolat…"
+  },
+  "help": {
+    "title": "Segítség",
+    "userManual": "Felhasznlói kézikönyv",
+    "keyboardShortcuts": "Gyorsbillentyük",
+    "about": "LibreTune-ról"
+  }
+}

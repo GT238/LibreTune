@@ -35,6 +35,11 @@ import ptBRMenu from './locales/pt-BR/menu.json';
 import ptBRDialog from './locales/pt-BR/dialog.json';
 import ptBRErrors from './locales/pt-BR/errors.json';
 
+import huHUCommon from './locales/hu-HU/common.json';
+import huHUMenu from './locales/hu-HU/menu.json';
+import huHUDialog from './locales/hu-HU/dialog.json';
+import huHUErrors from './locales/hu-HU/errors.json';
+
 export {
   SUPPORTED_LANGUAGES,
   LANGUAGE_STORAGE_KEY,
@@ -55,6 +60,12 @@ const resources = {
     dialog: ptBRDialog,
     errors: ptBRErrors,
   },
+  'hu-HU': {
+    common: huHUCommon,
+    menu: huHUMenu,
+    dialog: huHUDialog,
+    errors: huHUErrors,
+  },
 } as const;
 
 void i18n
@@ -63,7 +74,7 @@ void i18n
   .init({
     resources,
     fallbackLng: 'en',
-    supportedLngs: ['en', 'pt-BR'],
+    supportedLngs: ['en', 'pt-BR', 'hu-HU'],
     load: 'currentOnly',
     defaultNS: 'common',
     ns: ['common', 'menu', 'dialog', 'errors'],
