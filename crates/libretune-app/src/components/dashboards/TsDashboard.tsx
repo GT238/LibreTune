@@ -488,6 +488,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
         sweepValues={sweepValues}
         gaugeDemoActive={gaugeDemoActive}
         demoValues={demoValues}
+        isConnected={isConnected}
         wrapperRef={dashboardWrapperRef}
         onContextMenu={handleContextMenu}
       />

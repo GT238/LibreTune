@@ -59,12 +59,37 @@ export default function PopOutWindow() {
   const [constantValues, setConstantValues] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
 
   // Debug: log on mount
   useEffect(() => {
     console.log('[PopOutWindow] Component mounted');
     console.log('[PopOutWindow] hash:', window.location.hash);
     console.log('[PopOutWindow] href:', window.location.href);
+  }, []);
+
+  // Track connection status so the popped-out dashboard behaves the same as
+  // the main window (e.g. time-series gauges scroll only while connected).
+  useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const status = await invoke<{ state: string }>('get_connection_status');
+        if (!cancelled) {
+          setIsConnected(status.state === 'Connected');
+        }
+      } catch (e) {
+        console.error('[PopOutWindow] Failed to fetch connection status:', e);
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   // Parse URL params and load data
@@ -311,7 +336,7 @@ export default function PopOutWindow() {
 
     switch (popOutData.type) {
       case 'dashboard':
-        return <TsDashboard />;
+        return <TsDashboard isConnected={isConnected} />;
       
       case 'table':
         // Show loading while fetching data
