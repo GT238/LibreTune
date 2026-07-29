@@ -356,10 +356,7 @@ pub async fn get_constant_value(
         };
 
         let raw_data = conn.read_memory(params).map_err(|e| e.to_string())?;
-        if let Some(raw_val) = constant
-            .data_type
-            .read_from_bytes(&raw_data, 0, endianness)
-        {
+        if let Some(raw_val) = constant.data_type.read_from_bytes(&raw_data, 0, endianness) {
             return Ok(constant.raw_to_display(raw_val));
         }
         return Ok(0.0);
@@ -368,10 +365,7 @@ pub async fn get_constant_value(
     // If offline, read from cache (MSQ data)
     if let Some(cache) = cache_guard.as_ref() {
         if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
-            if let Some(raw_val) = constant
-                .data_type
-                .read_from_bytes(raw_data, 0, endianness)
-            {
+            if let Some(raw_val) = constant.data_type.read_from_bytes(raw_data, 0, endianness) {
                 return Ok(constant.raw_to_display(raw_val));
             }
         }
