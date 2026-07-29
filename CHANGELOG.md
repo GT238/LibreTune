@@ -13,6 +13,29 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-07-29 — Add `RUST_LOG`-controlled backend logging
+
+#### Added
+- **`tracing` subscriber initialization** in the Tauri backend
+  (`libretune-app/src-tauri/src/lib.rs`). Reads the `RUST_LOG` environment
+  variable and defaults to `info`, so normal dev runs are no longer flooded with
+  ECU protocol debug output.
+
+#### Changed
+- **ECU protocol logs now use `tracing`** — all `eprintln!` calls in
+  `libretune-core/src/protocol/connection.rs` were converted to
+  `tracing::debug!`, `tracing::info!`, or `tracing::warn!` based on their
+  existing severity labels. Set `RUST_LOG=libretune_core::protocol=debug` to see
+  the previous byte-level traffic output, or `RUST_LOG=error` to silence it.
+
+#### Documentation
+- Updated plugin-system docs (`docs/src/technical/plugin-system.md` and the
+  bundled manual copy) to describe the new `RUST_LOG` filtering behavior and
+  show ECU protocol examples.
+- Added a "Debug Logging" section to the troubleshooting guide.
+- Added a "Verbose ECU communication logs" note to the connection guide.
+- Added a "Logging during development" section to `CONTRIBUTING.md`.
+
 ### 2026-07-27 — Fix ECU communication stalls (Issue #71)
 
 #### Fixed

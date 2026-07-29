@@ -226,13 +226,35 @@ wasm-pack build --target web --release
 
 ## Debugging Plugins
 
-Enable debug logging:
+LibreTune uses [`tracing`](https://docs.rs/tracing) for backend logging. The default
+log level is `info`, so debug output is suppressed in normal dev runs. Set the
+`RUST_LOG` environment variable to enable more verbose output.
+
+Enable plugin debug logging:
 
 ```bash
 RUST_LOG=libretune_core::plugin_system=debug ./libretune
 ```
 
-View plugin logs in the application log output or console.
+Enable ECU protocol debug logging:
+
+```bash
+RUST_LOG=libretune_core::protocol=debug ./libretune
+```
+
+You can combine filters, for example:
+
+```bash
+RUST_LOG=libretune_core::plugin_system=debug,libretune_core::protocol=warn ./libretune
+```
+
+To suppress all backend logging entirely:
+
+```bash
+RUST_LOG=error ./libretune
+```
+
+View logs in the application log output or the terminal where LibreTune was started.
 
 ## See Also
 

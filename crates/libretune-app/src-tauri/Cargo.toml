@@ -30,6 +30,7 @@ tokio = { workspace = true }
 tauri-plugin-dialog = "2"
 chrono = { workspace = true }
 byteorder = "1"
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

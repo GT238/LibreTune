@@ -107,6 +107,24 @@ cargo clippy -p libretune-core
 cargo fmt
 ```
 
+### Logging during development
+
+LibreTune initializes a [`tracing`](https://docs.rs/tracing) subscriber in the
+Tauri backend. By default the log level is `info`, so verbose ECU protocol debug
+output is hidden. Use the `RUST_LOG` environment variable to control verbosity:
+
+```bash
+# Show detailed ECU communication logs
+cd crates/libretune-app
+RUST_LOG=libretune_core::protocol=debug npm run tauri dev
+
+# Show plugin debug logs
+RUST_LOG=libretune_core::plugin_system=debug npm run tauri dev
+
+# Quiet everything except errors
+RUST_LOG=error npm run tauri dev
+```
+
 ### Frontend (React/TypeScript)
 
 ```bash

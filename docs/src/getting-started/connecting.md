@@ -123,6 +123,18 @@ If the ECU signature doesn't match your INI file:
 - Check ECU is responsive (LEDs blinking)
 - Try power cycling the ECU
 
+### Verbose ECU communication logs
+
+If you need to see exactly what is being sent and received over the serial port
+while troubleshooting a connection, start LibreTune with the protocol debug
+filter enabled:
+
+```bash
+RUST_LOG=libretune_core::protocol=debug cargo tauri dev
+```
+
+Set `RUST_LOG=error` to suppress most backend output.
+
 ### "Signature mismatch"
 - Your INI file doesn't match the ECU firmware
 - Download the correct INI for your firmware version
