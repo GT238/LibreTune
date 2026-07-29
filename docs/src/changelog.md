@@ -49,6 +49,7 @@ All notable changes to LibreTune will be documented in this file.
 - CSV export/import for tune data
 - Reset tune to defaults
 - Runtime Packet Mode setting (Auto / Force Burst / Force OCH / Disabled)
+- Backend logging now controlled via `RUST_LOG` using `tracing` (`info` default); ECU protocol debug output can be re-enabled with `RUST_LOG=libretune_core::protocol=debug`
 
 ### Changed
 - Replaced template-based "New Project" flow with file-centric "Open Tune File" workflow

@@ -228,6 +228,35 @@ If the AppImage still fails after these steps:
 2. Verify GPU drivers: `glxinfo | grep "OpenGL version"`
 3. Report issue with system information and error messages
 
+## Debug Logging
+
+LibreTune prints backend log messages to the terminal where it was started. By
+default the log level is `info`, so verbose protocol debug output is hidden.
+
+To see detailed ECU communication logs while troubleshooting a connection:
+
+```bash
+RUST_LOG=libretune_core::protocol=debug ./libretune
+```
+
+To see plugin debug logs:
+
+```bash
+RUST_LOG=libretune_core::plugin_system=debug ./libretune
+```
+
+To quiet all non-error output:
+
+```bash
+RUST_LOG=error ./libretune
+```
+
+Multiple filters can be combined:
+
+```bash
+RUST_LOG=libretune_core::protocol=debug,libretune_core::plugin_system=warn ./libretune
+```
+
 ## Getting Help
 
 If these solutions don't work:
