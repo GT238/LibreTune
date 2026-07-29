@@ -4,6 +4,7 @@ import { DashFile, GaugeCluster, TsGaugeConfig, isGauge, isIndicator } from '../
 import TsGauge from '../../gauges/TsGauge';
 import LiveTsIndicator from './LiveTsIndicator';
 import { buildDefaultGauge } from '../utils/defaultGauge';
+import { resolveGaugeValue } from '../utils/resolveGaugeValue';
 import { useEnabledCondition } from '../hooks/useEnabledCondition';
 
 interface ChannelInfo {
@@ -156,11 +157,7 @@ export default function DashboardCanvas({
         {cluster.components.map((component, index) => {
           if (isGauge(component)) {
             const gauge = component.Gauge;
-            const value = sweepActive
-              ? (sweepValues[gauge.output_channel] ?? gauge.min)
-              : gaugeDemoActive
-                ? (demoValues[gauge.output_channel] ?? gauge.value)
-                : gauge.value;
+            const value = resolveGaugeValue(gauge, { sweepActive, sweepValues, gaugeDemoActive, demoValues });
 
             const gaugeStyle: React.CSSProperties = {
               left: `${toPercent(gauge.relative_x)}%`,
@@ -282,11 +279,7 @@ function ExtraClusterLayer({
       {cluster.components.map((component, index) => {
         if (isGauge(component)) {
           const gauge = component.Gauge;
-          const value = sweepActive
-            ? (sweepValues[gauge.output_channel] ?? gauge.min)
-            : gaugeDemoActive
-              ? (demoValues[gauge.output_channel] ?? gauge.value)
-              : gauge.value;
+          const value = resolveGaugeValue(gauge, { sweepActive, sweepValues, gaugeDemoActive, demoValues });
           const style: React.CSSProperties = {
             left: `${toPercent(gauge.relative_x)}%`,
             top: `${toPercent(gauge.relative_y)}%`,
