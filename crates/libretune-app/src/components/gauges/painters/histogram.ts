@@ -1,4 +1,13 @@
-/** Histogram — bar chart distribution visualization centered on current value. */
+/**
+ * Histogram — bar chart distribution visualization centered on current value.
+ *
+ * NOTE: This painter does NOT plot real distribution/histogram data yet. It
+ * SYNTHESIZES a bell curve (Gaussian) centred on the current `value` so the
+ * gauge looks alive, but the bars are decorative — they carry no underlying
+ * sample counts. Wire this up to real channel-history data (see
+ * `getChannelHistoryBuffer`, used by lineGraph) before relying on it for
+ * analysis. The simulation is the `barHeightPercent = exp(-dist²/20)` below.
+ */
 
 import { tsColorToHex } from '../../dashboards/dashTypes';
 import { roundRect, lightenColor, darkenColor } from '../drawUtils';

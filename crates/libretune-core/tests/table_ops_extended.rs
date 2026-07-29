@@ -1,3 +1,10 @@
+//! Extended table operation tests.
+//!
+//! Supplements `tests/table_ops.rs` with focused tests on selection-scoped
+//! operations: offsetting, filling, and linear interpolation across a region.
+//! Note the convention that interpolation anchors are the EDGES of the
+//! selection (not its centre), which is asserted in the interpolation cases.
+
 use libretune_core::table_ops::{
     add_offset, fill_region, interpolate_linear, FillDirection, InterpolationAxis,
 };

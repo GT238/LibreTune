@@ -37,7 +37,12 @@ export function SurfaceMesh({
     const xSize = x_bins.length;
     const ySize = y_bins.length;
     
-    // Normalize bins to 0-10 range for better visualization
+    // Normalize each axis to a fixed visualization range. Real table values
+    // can span very different magnitudes (e.g. RPM 0–8000 vs AFR 10–20), so
+    // without normalization the surface would look like a flat spike. X/Y are
+    // mapped to 0–10 and Z (height) to 0–5 to keep the surface proportions
+    // readable; the real values are still recoverable from the colour/labels.
+    // `|| 1` guards against a zero range (single-bin axis) → divide-by-zero.
     const xMin = Math.min(...x_bins);
     const xMax = Math.max(...x_bins);
     const yMin = Math.min(...y_bins);
@@ -45,12 +50,14 @@ export function SurfaceMesh({
     const zFlat = z_values.flat();
     const zMin = Math.min(...zFlat);
     const zMax = Math.max(...zFlat);
-    
     const normalizeX = (v: number) => ((v - xMin) / (xMax - xMin || 1)) * 10;
     const normalizeY = (v: number) => ((v - yMin) / (yMax - yMin || 1)) * 10;
     const normalizeZ = (v: number) => ((v - zMin) / (zMax - zMin || 1)) * 5;
     
-    // Create vertices
+    // Build the vertex buffer. Each table cell becomes one vertex. The grid is
+    // laid out row-major: cell (xi, yi) is at flat index yi*xSize + xi, and
+    // that same indexing is reused below when building triangle indices and in
+    // the click handler's face→cell reverse map — keep them in sync.
     const vertices: number[] = [];
     const colorArray: number[] = [];
     const indices: number[] = [];
@@ -61,7 +68,10 @@ export function SurfaceMesh({
         const y = normalizeY(y_bins[yi]);
         const z = normalizeZ(z_values[yi]?.[xi] ?? 0);
         
-        vertices.push(x, z, y); // Y-up convention in Three.js
+        // Three.js is Y-up, but our table's "height" (z_values) is the data
+        // axis. So we push (x, z, y): the data value becomes the vertical Y
+        // in world space, while the table's X/Y axes lie in the ground plane.
+        vertices.push(x, z, y);
         
         // Get color from heatmap
         const colorHex = valueToHeatmapColor(z_values[yi]?.[xi] ?? 0, zMin, zMax, heatmapScheme);
@@ -70,7 +80,15 @@ export function SurfaceMesh({
       }
     }
     
-    // Create triangle indices for the mesh
+    // Triangulate the grid: each interior quad (4 adjacent vertices) is split
+    // into two triangles. Winding order is counter-clockwise when viewed from
+    // above (+Y), so faces point up and are visible under default lighting/
+    // culling. If you flip the order, the surface becomes invisible from the
+    // top until back-face culling is disabled.
+    //
+    // IMPORTANT: this ordering is mirrored by the click handler, which derives
+    //   the clicked cell from the triangle's face index. Changing the winding
+    //   or the push order here without updating handleClick will break picking.
     for (let yi = 0; yi < ySize - 1; yi++) {
       for (let xi = 0; xi < xSize - 1; xi++) {
         const topLeft = yi * xSize + xi;
@@ -78,7 +96,7 @@ export function SurfaceMesh({
         const bottomLeft = (yi + 1) * xSize + xi;
         const bottomRight = bottomLeft + 1;
         
-        // Two triangles per quad
+        // Two triangles per quad, wound CCW-from-above.
         indices.push(topLeft, bottomLeft, topRight);
         indices.push(topRight, bottomLeft, bottomRight);
       }
@@ -94,6 +112,8 @@ export function SurfaceMesh({
   }, [x_bins, y_bins, z_values, heatmapScheme]);
 
   // Handle click on mesh
+  // Inverts the geometry build above: three.js reports which triangle (face)
+  // was hit, and we must walk back from face index → quad → (xi, yi) cell.
   const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
     if (!onCellClick || !event.face) return;
     
@@ -103,7 +123,11 @@ export function SurfaceMesh({
     const faceIndex = event.faceIndex;
     if (faceIndex === undefined || faceIndex === null) return;
     
-    // Each quad has 2 triangles, so divide by 2 to get quad index
+    // Each quad contributes exactly 2 triangles, so faceIndex/2 maps back to
+    // the quad's linear index in the grid. Note xSize here is `x_bins.length - 1`
+    // (quad count per row), NOT the vertex count — using the vertex count here
+    // is a classic off-by-one that would mis-attribute clicks to wrong cells.
+    // The div/mod then recovers row (yi) and column (xi) in the grid.
     const quadIndex = Math.floor(faceIndex / 2);
     const xSize = x_bins.length - 1;
     const yi = Math.floor(quadIndex / xSize);

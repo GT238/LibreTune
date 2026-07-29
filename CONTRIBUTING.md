@@ -177,6 +177,12 @@ Please update or extend the test utilities if you find repeated patterns that ca
 - Pass `cargo clippy` without warnings
 - Write doc comments for public APIs
 - Include unit tests for new functionality
+- Comments should explain **why**, not restate **what** the code/test does.
+  In tests, document fixture invariants (e.g. what state a helper guarantees)
+  and the rationale behind each assertion rather than restating the test name.
+  Module-level `//!` headers belong on every integration test file — see
+  `crates/libretune-core/tests/{bit_extraction,f64_and_precision,plugin_api}.rs`
+  for the target style.
 
 ### TypeScript/React
 
@@ -184,6 +190,11 @@ Please update or extend the test utilities if you find repeated patterns that ca
 - Follow existing component patterns in the codebase
 - Use TypeScript strict mode (already configured)
 - Prefer `useMemo` for expensive computations
+- Document non-obvious algorithms, state machines, and magic numbers with the
+  **why** (rationale, bug/issue references, edge cases). Keep JSDoc on
+  component props. Reference files:
+  `src/components/gauges/useGaugeRenderer.ts` and
+  `src/hooks/useRealtimeStream.ts` exemplify the target style.
 
 ## Submitting Changes
 

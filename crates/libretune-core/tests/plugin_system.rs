@@ -1,9 +1,23 @@
 //! Plugin system integration tests
 //!
 //! Tests the plugin lifecycle, permission system, and plugin manager.
+//!
+//! # Fixtures
+//!
+//! Tests use [`create_test_manifest()`] and [`create_test_config()`] as the
+//! baseline plugin metadata. The default manifest requests only `ReadTables`
+//! and `WriteConstants` — a representative read-mostly plugin — so tests that
+//! need the full permission set construct their own manifest inline rather
+//! than mutating the fixture.
 
 use libretune_core::plugin_system::*;
 
+/// A representative read-mostly plugin manifest.
+///
+/// Requests only `ReadTables` + `WriteConstants` — enough for a VE-analysis
+/// style plugin, but deliberately *not* `SubscribeChannels` or
+/// `ExecuteActions`. Tests that need those grants (or none at all) build their
+/// own manifest rather than mutating this one, to keep the fixture stable.
 fn create_test_manifest() -> PluginManifest {
     PluginManifest {
         name: "ve_analyzer".to_string(),
@@ -14,6 +28,10 @@ fn create_test_manifest() -> PluginManifest {
     }
 }
 
+/// A minimal, non-persisting plugin config.
+///
+/// `data_dir` points at a throwaway path (no real I/O happens in these
+/// tests). `ecu_type` is set to Speeduino as a representative platform.
 fn create_test_config() -> PluginConfig {
     PluginConfig {
         data_dir: "/tmp/libretune_plugins".to_string(),
@@ -52,7 +70,9 @@ fn test_permission_enum_all_variants() {
 
     assert_eq!(all_perms.len(), 4);
 
-    // Verify each permission is unique
+    // Permissions are `#[derive(Eq)]`, so distinct variants must compare
+    // unequal — this guards against accidentally collapsing the capability
+    // space (e.g. via a future `as u8` cast that aliases two variants).
     for (i, perm1) in all_perms.iter().enumerate() {
         for (j, perm2) in all_perms.iter().enumerate() {
             if i != j {
@@ -84,7 +104,9 @@ fn test_plugin_config_creation() {
 
 #[test]
 fn test_plugin_state_enum_values() {
-    // Verify all state variants exist and are distinct
+    // All five lifecycle states must exist and compare distinct — the state
+    // machine in `PluginInstance` dispatches on these, so two states aliasing
+    // would cause a plugin to be treated as terminal/active incorrectly.
     let states = [
         PluginState::Loaded,
         PluginState::Ready,
@@ -95,7 +117,6 @@ fn test_plugin_state_enum_values() {
 
     assert_eq!(states.len(), 5);
 
-    // Verify they're all distinct
     for (i, state1) in states.iter().enumerate() {
         for (j, state2) in states.iter().enumerate() {
             if i != j {
@@ -125,7 +146,8 @@ fn test_plugin_manager_nonexistent_plugin() {
     let config = create_test_config();
     let manager = PluginManager::new(config);
 
-    // Attempting to get non-existent plugin should return None
+    // Unknown plugin names must resolve to `None`, not panic — the host API
+    // relies on this to return a clean "not found" rather than crashing.
     assert!(manager.get_plugin("nonexistent").is_none());
 }
 
@@ -133,12 +155,13 @@ fn test_plugin_manager_nonexistent_plugin() {
 fn test_plugin_manifest_serialization() {
     let manifest = create_test_manifest();
 
-    // Serialize to JSON
+    // serde_json round-trip must preserve identity. Manifests are persisted
+    // to disk as JSON, so a field dropped or renamed in transit would corrupt
+    // every installed plugin.
     let json = serde_json::to_string(&manifest).expect("Failed to serialize");
     assert!(json.contains("ve_analyzer"));
     assert!(json.contains("1.0.0"));
 
-    // Deserialize back
     let deserialized: PluginManifest = serde_json::from_str(&json).expect("Failed to deserialize");
     assert_eq!(manifest.name, deserialized.name);
     assert_eq!(manifest.version, deserialized.version);
@@ -214,20 +237,20 @@ fn test_plugin_config_different_ecu_types() {
 
 #[test]
 fn test_plugin_lifecycle_states() {
-    // Verify state progression is logically sound
+    // Spot-check adjacent lifecycle transitions compare distinct, so a state
+    // machine guard can never confuse e.g. Ready with Running. Reflexivity is
+    // asserted separately to catch a broken `PartialEq`.
     let loaded = PluginState::Loaded;
     let ready = PluginState::Ready;
     let running = PluginState::Running;
     let unloading = PluginState::Unloading;
     let disabled = PluginState::Disabled;
 
-    // All distinct
     assert_ne!(loaded, ready);
     assert_ne!(ready, running);
     assert_ne!(running, unloading);
     assert_ne!(unloading, disabled);
 
-    // Self-equality
     assert_eq!(loaded, PluginState::Loaded);
     assert_eq!(ready, PluginState::Ready);
 }
@@ -256,7 +279,9 @@ fn test_multiple_manifest_versions() {
 
 #[test]
 fn test_permission_bits() {
-    // Verify permissions can be checked individually
+    // Membership checks are the basis of `check_permission`; this confirms a
+    // partial grant set admits its members and denies the absent one
+    // (`ExecuteActions`), which is exactly the approval semantics.
     let perms = vec![
         Permission::ReadTables,
         Permission::WriteConstants,
@@ -275,7 +300,9 @@ fn test_plugin_config_immutability() {
     let config1 = create_test_config();
     let config2 = create_test_config();
 
-    // Configs should be equal but independent
+    // Two configs built independently must be field-equal but not share state
+    // — guards against a regression where `Default` accidentally aliased a
+    // shared buffer for `data_dir`.
     assert_eq!(config1.ecu_type, config2.ecu_type);
     assert_eq!(config1.data_dir, config2.data_dir);
 }

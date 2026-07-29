@@ -1,5 +1,8 @@
-// Integration tests for Lua scripting engine
-// Tests the execute_script function directly without Tauri overhead
+//! Integration tests for the Lua scripting engine.
+//!
+//! Tests `execute_script` directly without going through the Tauri command
+//! layer. Covers basic `print` output capture, sandboxing restrictions, and
+//! error propagation from the embedded runtime.
 
 use libretune_core::lua::execute_script;
 

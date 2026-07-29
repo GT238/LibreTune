@@ -47,7 +47,12 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
   }, []);
 
   
-  // Scroll to and highlight matching field when highlightTerm is provided
+  // Scroll to and highlight matching field when highlightTerm is provided.
+  // Two delays, both chosen empirically:
+  //   - 100ms outer: wait for the dialog DOM to finish rendering after the
+  //     highlight term is set, otherwise querySelector can't find the field.
+  //   - 2000ms inner: how long the search-highlight-flash CSS animation runs
+  //     before the class is removed (matches the CSS keyframe duration).
   useEffect(() => {
     if (!highlightTerm || !containerRef.current) return;
     

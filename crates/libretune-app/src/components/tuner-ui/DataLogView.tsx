@@ -460,7 +460,16 @@ export const DataLogView: React.FC = () => {
     }
   }, []);
   
-  // Parse CSV file - supports both LibreTune and TunerStudio formats
+  // Parse a CSV datalog into a plottable series. Supports TWO on-disk formats:
+  //   - TunerStudio: a `Time` column in SECONDS (with decimals).
+  //   - LibreTune:   a `timestamp_ms`/`timestamp` column in MILLISECONDS.
+  // The time column is detected by header name; TunerStudio's seconds are
+  // multiplied by 1000 so all timestamps end up in ms internally. If no time
+  // column is present, rows are spaced at 100ms each so the chart still has an
+  // x axis. NOTE: this is a minimal hand-rolled CSV reader (not a full RFC
+  // 4180 parser) — it handles quoted fields with embedded commas via the
+  // inQuotes toggle below, but does not handle escaped quotes ("") or CRLF
+  // inside quotes. Datalogs from both apps are simple enough that this suffices.
   const parseLogCsv = useCallback((content: string, _fileName: string): { 
     data: { x: number; values: Record<string, number> }[];
     channels: string[];
@@ -479,6 +488,7 @@ export const DataLogView: React.FC = () => {
       h.toLowerCase() === 'timestamp'
     );
     
+    // Distinguishes the two formats so the timestamp can be unit-normalized.
     const isTunerStudioFormat = headers.some(h => h.toLowerCase() === 'time');
     const channels = headers.filter((_, i) => i !== timeColIndex);
     
@@ -488,7 +498,9 @@ export const DataLogView: React.FC = () => {
       const line = lines[i].trim();
       if (!line) continue;
       
-      // Parse CSV values (handle quoted values)
+      // Minimal quoted-CSV state machine: toggle inQuotes on each '"' so that
+      // commas inside quoted fields don't split the field. Anything else is
+      // accumulated into the current field.
       const values: string[] = [];
       let current = '';
       let inQuotes = false;
@@ -506,7 +518,7 @@ export const DataLogView: React.FC = () => {
       
       if (values.length < headers.length) continue;
       
-      // Parse timestamp
+      // Parse timestamp, normalizing both formats to milliseconds.
       let timestamp: number;
       if (timeColIndex >= 0) {
         const timeStr = values[timeColIndex];

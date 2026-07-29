@@ -75,6 +75,12 @@ export function useReconnectHandler(deps: UseReconnectHandlerDeps) {
         console.warn('Could not read reconnect settings:', e);
       }
 
+      // Delays and retry counts default higher for firmware flashes than for
+      // controller commands: a firmware update reboots the whole ECU (serial
+      // port disappears and re-enumerates, bootloader handshake adds seconds),
+      // whereas a controller command (e.g. reset) just bounces the app and
+      // comes back quickly. The 8s/10x firmware budget vs 2s/4x command budget
+      // reflects that observed difference; callers can override per-event.
       const delayMs = detail.delayMs ?? (isFirmware ? 8000 : 2000);
       const maxRetries = detail.retries ?? (isFirmware ? 10 : 4);
       const targetPort =

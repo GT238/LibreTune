@@ -21,7 +21,14 @@ export interface UseAutoConnectDeps {
   refreshPorts: () => Promise<string[]>;
 }
 
+// Poll cadence for the auto-connect loop. 2500ms balances responsiveness
+// (the user notices a plugged-in ECU within a few seconds) against avoiding
+// serial-port enumeration spam that can itself interfere with a freshly
+// appearing device.
 const POLL_INTERVAL_MS = 2500;
+// Brief startup grace period before the first poll. Gives the OS time to
+// finish enumerating ports (and any pending reconnect from a previous session
+// time to settle) so the first auto-connect attempt sees a stable port list.
 const INITIAL_DELAY_MS = 600;
 
 function isConnectedStatus(connection: ConnectionStatus): boolean {
