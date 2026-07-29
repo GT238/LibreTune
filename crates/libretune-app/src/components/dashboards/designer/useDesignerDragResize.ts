@@ -1,8 +1,17 @@
 import { useState, useCallback, useEffect, RefObject } from 'react';
 import { DashFile, DashComponent, isGauge, isIndicator } from '../dashTypes';
 
+// 8 resize handles, named after the compass edge/corner they sit on:
+//   n/s = north/south (top/bottom edges, control height)
+//   e/w = east/west   (right/left edges, control width)
+//   ne/nw/se/sw = corners (control both, and also move the opposite corner).
+// The mousemove handler below decodes each handle by checking which of
+// 'e'/'w'/'n'/'s' it `.includes()` — see that handler for the per-axis logic.
 export type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
+// In-progress drag. Positions are captured in CLIENT pixels at mousedown and
+// converted to relative (0-1) deltas during mousemove by dividing by the
+// container's pixel size — that's why the containerRef is required.
 interface DragState {
   isDragging: boolean;
   startX: number;
@@ -182,6 +191,12 @@ export function useDesignerDragResize({
         let newX = resizeState.startRelativeX;
         let newY = resizeState.startRelativeY;
 
+        // Decode the handle into per-axis effects. Deltas are already in
+        // relative (0-1) units, so adding them to width/height/x/y keeps the
+        // component consistent. Key insight: dragging an EAST edge grows width
+        // (left edge stays), but dragging a WEST edge SHRINKS width AND moves
+        // the left edge (x) by the same amount — otherwise the right edge
+        // would drift. Same mirror logic for s (bottom) vs n (top).
         const handle = resizeState.handle;
         if (handle.includes('e')) newWidth = snapToGrid(resizeState.startWidth + deltaX);
         if (handle.includes('w')) {

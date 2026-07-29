@@ -1,3 +1,11 @@
+//! Unit conversion tests.
+//!
+//! Covers the pure conversion helpers in `unit_conversion.rs` used to display
+//! channels in user-preferred units: temperature (C↔F), pressure
+//! (kPa/PSI/bar), ratio (AFR↔lambda), and speed (km/h↔mph). Anchor values
+//! use well-known physical constants (e.g. 0 °C = 32 °F, 1 atm ≈ 14.696 psi)
+//! so a regression is immediately visible.
+
 use libretune_core::unit_conversion::{
     afr_to_lambda, bar_to_psi, celsius_to_fahrenheit, fahrenheit_to_celsius, kmh_to_mph,
     kpa_to_psi, lambda_to_afr, mph_to_kmh, psi_to_bar, psi_to_kpa,

@@ -1,3 +1,12 @@
+//! Action-set validation tests.
+//!
+//! `ActionPlayer::validate_action_set` checks that every action in a recorded
+//! set references objects that actually exist in the target ECU definition
+//! (tables, constants, controller commands). These tests build a minimal
+//! `EcuDefinition` fixture with exactly one of each, then exercise both the
+//! happy path (all references resolve) and the failure path (every reference
+//! is missing) so that each error message is asserted individually.
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::vec_init_then_push)]
@@ -11,7 +20,9 @@ mod tests {
     fn test_validate_action_set_valid() {
         let mut def = EcuDefinition::default();
 
-        // Setup Table
+        // Minimal definition with one table, one constant, one command —
+        // exactly the surface the validator can resolve. Each is referenced
+        // by an action below.
         let table = TableDefinition {
             name: "veTable1".to_string(),
             map_name: None,
@@ -35,11 +46,11 @@ mod tests {
         };
         def.tables.insert("veTable1".to_string(), table);
 
-        // Setup Constant
+        // A U16 constant (e.g. rev limit RPM) at page 1, offset 0.
         let constant = Constant::new("RevLim", 1, 0, DataType::U16);
         def.constants.insert("RevLim".to_string(), constant);
 
-        // Setup Command
+        // A controller command that burns the tune to flash (raw byte 'B').
         let cmd = ControllerCommand {
             name: "burn".to_string(),
             label: "Burn".to_string(),
@@ -86,6 +97,10 @@ mod tests {
         assert!(result.is_ok(), "Validation failed: {:?}", result.err());
     }
 
+    /// Every action references a name that does NOT exist in the (empty)
+    /// default definition, so validation must fail and the error must call out
+    /// each missing reference by name. The default `EcuDefinition` has empty
+    /// tables/constants/commands maps, which is why this needs no fixture.
     #[test]
     fn test_validate_action_set_invalid() {
         let def = EcuDefinition::default();

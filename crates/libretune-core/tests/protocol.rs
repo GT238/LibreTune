@@ -1,7 +1,26 @@
+//! Serial protocol plumbing tests.
+//!
+//! These tests exercise the low-level protocol helpers ([`ProtocolError`]
+//! formatting, the [`MockSerial`] test double) rather than full request/response
+//! cycles, which are covered by the inline `#[cfg(test)]` blocks in
+//! `src/protocol/`. The mock here exists so other tests can drive the
+//! connection layer without binding to a real serial-port crate.
+
 use libretune_core::protocol::ProtocolError;
 use std::sync::{Arc, Mutex};
 
-/// Mock serial port for testing
+/// Hand-rolled in-memory serial double.
+///
+/// No real serial-port library is used here — instead the port owns two
+/// independent buffers:
+/// - `recv_buffer` — bytes the "ECU" will hand back, consumed in order via
+///   [`read_byte`](MockSerial::read_byte) until EOF.
+/// - `send_buffer` — accumulates everything the host writes via
+///   [`write_all`](MockSerial::write_all), so tests can assert on the exact
+///   bytes the protocol layer emitted.
+///
+/// `fail_on_send` is a fault-injection toggle: when set, the next
+/// `write_all` returns an error, used to exercise the protocol's error path.
 struct MockSerial {
     send_buffer: Vec<u8>,
     recv_buffer: Vec<u8>,
@@ -49,10 +68,12 @@ impl MockSerial {
 
 #[test]
 fn test_connection_creation() {
-    // Should create connection without panic
+    // Wrapping a MockSerial in the Arc<Mutex<..>> shape the connection layer
+    // expects must not panic. Full connection construction is not exercised
+    // here — it depends on private impl details covered by the inline tests
+    // in `src/protocol/connection.rs`.
     let mock = MockSerial::new();
     let _shared = Arc::new(Mutex::new(mock));
-    // Connection creation would require implementation details
 }
 
 #[test]
@@ -67,13 +88,13 @@ fn test_protocol_error_display() {
     assert!(!err.to_string().is_empty());
 }
 
-#[test]
-fn test_crc16_calculation_deterministic() {
-    // Test that protocol error type exists and can be used
-    let err = ProtocolError::Timeout;
-    let err_str = format!("{}", err);
-    assert!(!err_str.is_empty());
-}
+// NOTE: A test named `test_crc16_calculation_deterministic` previously lived
+// here but was removed: despite its name it did NOT exercise CRC at all — it
+// was a verbatim duplicate of `test_protocol_error_display` (formatting a
+// `ProtocolError::Timeout`). No CRC16/CRC32 implementation exists anywhere in
+// `libretune-core` today, so a real CRC test is out of scope. If/when CRC is
+// implemented, add a dedicated test in the corresponding `packet.rs` test
+// block rather than resurrecting this misleading one.
 
 #[test]
 fn test_timeout_error() {
@@ -93,7 +114,9 @@ fn test_serial_mockserial_read() {
 
 #[test]
 fn test_serial_mockserial_eof() {
-    let mut mock = MockSerial::new(); // empty response buffer
+    // An empty recv_buffer must yield EOF (Err), not a panic or a zero byte —
+    // the protocol layer relies on this to detect end-of-response.
+    let mut mock = MockSerial::new();
     let result = mock.read_byte();
     assert!(result.is_err());
 }

@@ -13,6 +13,62 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-07-29 — Comment overhaul (Rust tests + frontend logic)
+
+Overhaul of code comments across the test suite and frontend logic. **No
+behavioural changes** — every edit is a comment or doc-block except the two
+test removals noted under *Removed*. Verified by `cargo test`
+(libretune-core) and `npm run typecheck` / `npm run build` (frontend).
+
+#### Changed
+- **Rust integration tests** (`crates/libretune-core/tests/`) — replaced
+  name-restating comments with assertion rationale and documented the
+  non-obvious fixtures. For example, `tests/plugin_api.rs` now spells out the
+  `create_test_context()` invariant (a `PluginManager` with zero plugins, so
+  every permission check returns `false` — *why* every permission test expects
+  denial) and labels each denial with the specific permission that would be
+  required to succeed. Similar treatment for `tune.rs` (was 15 tests with zero
+  comments), `plugin_system.rs`, `megatune_parsing.rs`, `action_validation.rs`,
+  and `port_editor.rs`.
+- **Missing module `//!` headers** added to nine test files
+  (`action_validation`, `autotune_heatmap`, `evaluator`, `lua_scripting`,
+  `megatune_parsing`, `protocol`, `table_ops_extended`, `tune`,
+  `unit_conversion`); `lua_scripting.rs`'s `//` block was converted to `//!`.
+- **Frontend HIGH-severity logic** — documented the previously-undocumented
+  security-sensitive and algorithm-heavy paths:
+  - `utils/evaluateIndicatorExpression.ts`: the `new Function()` security
+    stance (the tokenizer restricts input to identifiers/numbers/operators,
+    and every identifier is pre-substituted with a numeric literal before
+    compilation, so no attacker-controlled identifier can become code), the
+    single-identifier fast path, and the fail-safe fallback.
+  - `components/tables/3d/SceneComponents.tsx`: the Three.js triangle winding
+    order (CCW-from-above for front-face culling) and the click-handler
+    face→cell reverse map (`faceIndex/2 → quad → (xi, yi)`), plus the
+    `vertices.push(x, z, y)` Y-up swap.
+  - `components/tables/TableEditor2D.tsx`: the `[x,y]` vs `[row,col]`
+    coordinate convention, the undo/redo history-stack semantics (redo
+    truncation, 50-step cap, stale-closure note), paste delimiter
+    auto-detection, and the dual-threshold large-change warning with its
+    divide-by-zero guard.
+  - `App.tsx`: a file header describing the connection state machine phases
+    and effect-ordering rationale.
+- **Frontend MEDIUM-severity logic** — `TableGrid.tsx` (fractional-cell live
+  cursor interpolation + the header-select heuristic),
+  `DataLogView.tsx` (the quoted-CSV state machine and the TunerStudio/LibreTune
+  timestamp-format detection), `useDesignerDragResize.ts` (the 8-handle resize
+  math), `useDesignerHistory.ts` (redo truncation + deep-clone rationale),
+  `useReconnectHandler.ts` / `useAutoConnect.ts` (the firmware-vs-command
+  retry magic numbers), and `DialogRenderer.tsx` (search-highlight timeouts).
+
+#### Removed
+- **`test_crc16_calculation_deterministic`** (`tests/protocol.rs`) — a
+  misleading test: despite its name it did not exercise any CRC (no CRC
+  implementation exists in the codebase); it was a verbatim duplicate of
+  `test_protocol_error_display`. Left an explanatory NOTE in its place.
+- **`test_repository_extraction_with_comments`** (`tests/ini_parsing.rs`) — an
+  empty placeholder with no assertions; its own body explained it could not
+  reach the private target method from this public-API test file.
+
 ### 2026-07-29 — Add `RUST_LOG`-controlled backend logging
 
 #### Added

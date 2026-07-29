@@ -1,3 +1,12 @@
+//! AutoTune VE-cell recommendation tests.
+//!
+//! Drives `AutoTuneState` through a synthetic run (via the `feed` helper
+//! below) and asserts the recommended VE values, hit counts, and the
+//! cumulative-moving-average (CMA) behaviour converge correctly. Several
+//! cases here are regression guards for specific past bugs — see the inline
+//! `bug #…` references. Lambda-delay handling is exercised by advancing the
+//! timestamp stream on each sample (delay ≈ 190 ms @ 1000 RPM).
+
 use libretune_core::autotune::{
     AutoTuneFilters, AutoTuneReferenceTables, AutoTuneSettings, AutoTuneState, VEDataPoint,
 };

@@ -1,10 +1,27 @@
 //! Plugin API integration tests
 //!
 //! Tests the WASM host function API surface and permission enforcement.
+//!
+//! # Test fixture invariant
+//!
+//! [`create_test_context()`] builds a [`PluginManager`] with **no plugins
+//! registered**, so every `check_permission(...)` call returns `false`.
+//! This is why every permission-guarded host function below is expected to be
+//! denied — the fixture proves the guard rejects *unknown* plugins without the
+//! caller having to set up a permissions table.
 
 use libretune_core::plugin_api::*;
 use libretune_core::plugin_system::*;
 
+/// Build an API context wrapping an empty [`PluginManager`].
+///
+/// No plugin is registered, so `PluginManager::check_permission` always
+/// returns `false`. Every permission-guarded host function (table/constant
+/// access, channel subscription, action execution) will therefore report
+/// [`ApiResponse::permission_denied`] regardless of the plugin name passed in.
+/// Only `api_log_message` (which intentionally bypasses the permission gate)
+/// and `api_get_plugin_info` (which fails with "not found" instead) succeed
+/// differently for an unregistered plugin name.
 fn create_test_context() -> PluginApiContext {
     let config = PluginConfig {
         data_dir: "/tmp/libretune_plugins".to_string(),
@@ -47,7 +64,8 @@ fn test_api_context_initialization() {
 fn test_api_get_table_data_permission_check() {
     let ctx = create_test_context();
 
-    // Plugin with no permissions should be denied
+    // "restricted_plugin" is not registered, so it lacks ReadTables and must
+    // be rejected before any table data is read.
     let resp = api_get_table_data(&ctx, "restricted_plugin", "veTable1", 0, 0);
     assert!(!resp.success);
     assert!(resp.error.contains("Permission"));
@@ -57,7 +75,8 @@ fn test_api_get_table_data_permission_check() {
 fn test_api_get_constant_permission_check() {
     let ctx = create_test_context();
 
-    // Plugin with no permissions should be denied
+    // Constants are covered by ReadTables (see api_get_constant docs); an
+    // unregistered plugin lacks it and must be rejected.
     let resp = api_get_constant(&ctx, "restricted_plugin", "rpmMin");
     assert!(!resp.success);
 }
@@ -66,7 +85,8 @@ fn test_api_get_constant_permission_check() {
 fn test_api_set_constant_permission_check() {
     let ctx = create_test_context();
 
-    // Plugin without WriteConstants permission should be denied
+    // Writes are a distinct permission from reads: "readonly_plugin" lacks
+    // WriteConstants, so the byte payload must never reach the tune cache.
     let resp = api_set_constant(&ctx, "readonly_plugin", "rpmMin", &[0, 0, 0, 0]);
     assert!(!resp.success);
     assert!(resp.error.contains("WriteConstants"));
@@ -76,7 +96,8 @@ fn test_api_set_constant_permission_check() {
 fn test_api_subscribe_channel_permission_check() {
     let ctx = create_test_context();
 
-    // Plugin without SubscribeChannels permission should be denied
+    // "limited_plugin" holds no SubscribeChannels grant, so it cannot register
+    // a realtime subscription and must be rejected up front.
     let resp = api_subscribe_channel(&ctx, "limited_plugin", "RPM");
     assert!(!resp.success);
 }
@@ -85,7 +106,8 @@ fn test_api_subscribe_channel_permission_check() {
 fn test_api_get_channel_value_permission_check() {
     let ctx = create_test_context();
 
-    // Plugin without SubscribeChannels permission should be denied
+    // Reading a subscribed channel value re-checks SubscribeChannels, so even
+    // a guessed channel_id (42) must be rejected for an unregistered plugin.
     let resp = api_get_channel_value(&ctx, "limited_plugin", 42);
     assert!(!resp.success);
 }
@@ -94,7 +116,8 @@ fn test_api_get_channel_value_permission_check() {
 fn test_api_execute_action_permission_check() {
     let ctx = create_test_context();
 
-    // Plugin without ExecuteActions permission should be denied
+    // "noaccess_plugin" lacks ExecuteActions, so the JSON action payload must
+    // be rejected before any command is parsed or dispatched.
     let resp = api_execute_action(&ctx, "noaccess_plugin", "{}");
     assert!(!resp.success);
     assert!(resp.error.contains("ExecuteActions"));
@@ -104,7 +127,8 @@ fn test_api_execute_action_permission_check() {
 fn test_api_log_message_always_allowed() {
     let ctx = create_test_context();
 
-    // Logging should always be allowed, no permission needed
+    // Logging deliberately bypasses the permission gate — it is the one host
+    // function any plugin may call, so an unregistered plugin still succeeds.
     let resp = api_log_message(&ctx, "test_plugin", 1, "Info message");
     assert!(resp.success);
 
@@ -162,7 +186,8 @@ fn test_plugin_log_message_formatting() {
 fn test_api_get_plugin_info_not_found() {
     let ctx = create_test_context();
 
-    // Plugin doesn't exist
+    // get_plugin_info is not permission-gated, but an unknown name yields an
+    // explicit "not found" error rather than permission_denied.
     let resp = api_get_plugin_info(&ctx, "nonexistent_plugin");
     assert!(!resp.success);
     assert!(resp.error.contains("not found"));
@@ -209,7 +234,8 @@ fn test_api_response_error_only() {
 fn test_multiple_log_messages() {
     let ctx = create_test_context();
 
-    // Multiple logs should all succeed
+    // Each call is independent and permission-free, so a rapid burst of logs
+    // must all succeed (no rate limit or dedup at this layer).
     for i in 0..5 {
         let msg = format!("Log message {}", i);
         let resp = api_log_message(&ctx, "test", 1, msg);
@@ -221,7 +247,9 @@ fn test_multiple_log_messages() {
 fn test_api_permission_enforcement_consistency() {
     let ctx = create_test_context();
 
-    // Same plugin should get consistent permission denied response
+    // Denial must be uniform across calls: the same unregistered plugin is
+    // rejected regardless of which table/cell it targets, confirming the guard
+    // is keyed on permissions and not on the specific request.
     let resp1 = api_get_table_data(&ctx, "test_plugin", "table1", 0, 0);
     let resp2 = api_get_table_data(&ctx, "test_plugin", "table2", 5, 5);
 
@@ -235,7 +263,8 @@ fn test_api_permission_enforcement_consistency() {
 fn test_log_message_multiple_plugins() {
     let ctx = create_test_context();
 
-    // Different plugins can log independently
+    // Logging state is never shared between plugin names, so three distinct
+    // (unregistered) plugins can each emit a log without interference.
     let resp1 = api_log_message(&ctx, "plugin_a", 0, "From A");
     let resp2 = api_log_message(&ctx, "plugin_b", 1, "From B");
     let resp3 = api_log_message(&ctx, "plugin_c", 2, "From C");

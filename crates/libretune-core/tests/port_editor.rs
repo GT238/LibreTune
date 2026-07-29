@@ -4,6 +4,16 @@
 mod tests {
     use libretune_core::port_editor::{DigitalOutputType, EcuPin, PortEditorConfig};
 
+    /// Build a small mock pin topology for assignment tests.
+    ///
+    /// Returns 5 available pins modelling a typical Speeduino-style board:
+    /// - `P0.0`–`P0.3` — four outputs on port 0 (default-labelled injectors
+    ///   and ignition outputs), used to exercise multi-assignment and conflicts.
+    /// - `P1.5` — a fifth pin on port 1 (fuel pump), on a different port so
+    ///   cross-port category grouping can be tested.
+    ///
+    /// All pins start `is_available: true`; assignments are layered on top by
+    /// the individual tests.
     fn create_mock_pins() -> Vec<EcuPin> {
         vec![
             EcuPin {
@@ -122,7 +132,9 @@ mod tests {
             )
             .unwrap();
 
-        // Disable the assignment - should not appear in conflict detection
+        // A disabled assignment must NOT participate in conflict detection:
+        // the user has effectively taken that output offline, so reusing its
+        // pin for a different (enabled) output is legitimate, not a conflict.
         if let Some(assignment) = config.assignments.iter_mut().next() {
             assignment.enabled = false;
         }

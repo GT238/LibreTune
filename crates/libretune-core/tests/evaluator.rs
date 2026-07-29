@@ -1,3 +1,11 @@
+//! Realtime `Evaluator` integration tests.
+//!
+//! The evaluator resolves output-channel dependency chains: a channel may
+//! reference other channels in its expression (`{rpm * 0.5}`, etc.), so the
+//! evaluator must topologically order them and compute in the right sequence.
+//! These tests build a minimal `EcuDefinition` with raw channels at known
+//! offsets and assert that derived channels read the upstream values.
+
 #![allow(clippy::field_reassign_with_default)]
 use libretune_core::ini::{DataType, EcuDefinition, Endianness, OutputChannel};
 use libretune_core::realtime::evaluator::Evaluator;

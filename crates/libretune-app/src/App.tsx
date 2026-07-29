@@ -69,6 +69,40 @@ import {
 } from "./types/app";
 import "./styles";
 
+/**
+ * Root application component.
+ *
+ * `AppContent` is the orchestrator that wires together ~20 hooks and holds the
+ * top-level state that other components read via props/contexts. The bulk of
+ * the file is organized as:
+ *
+ *   1. State declarations (project, connection, menus, tabs, dialogs...).
+ *   2. Effects that react to connection/definition changes.
+ *   3. Action handlers (connect, save/load/burn, tab open/close...).
+ *   4. Render tree (layout + overlays).
+ *
+ * # Connection lifecycle (the central state machine)
+ *
+ * Connection status lives in `status: ConnectionStatus` and drives most of the
+ * app. The meaningful phases are encoded across `status.state` and
+ * `status.has_definition`:
+ *   - No project loaded → nothing to connect to; tabs/menus empty.
+ *   - Project loaded, disconnected → user (or auto-connect) picks a port.
+ *   - Connecting → handshake in flight (see `useAutoConnect`/`useReconnectHandler`).
+ *   - Connected + has_definition → INI matched the ECU; menus, tables, and the
+ *     realtime stream can all come up.
+ *   - Connected + signature mismatch → INI doesn't match the ECU; the mismatch
+ *     dialog is shown and table/menu loading is skipped.
+ *
+ * # Effect ordering
+ *
+ * The realtime stream hook (`useRealtimeStream`) and the menu/table loaders all
+ * gate on `status` / `status.has_definition` so they only run once an INI is
+ * matched. Several effects were extracted to hooks to keep this file readable;
+ * see those hooks for their internal rationale. The realtime listener itself
+ * is intentionally registered once at module level (NOT in an effect) to dodge
+ * a StrictMode double-invoke race — see the comment near `useRealtimeStream`.
+ */
 function AppContent() {
   const { theme, setTheme } = useTheme();
   const { t } = useTranslation('menu');
@@ -557,7 +591,12 @@ function AppContent() {
     return () => clearInterval(interval);
   }, [isLogging]);
 
-  // Load menus when definition is loaded
+  // Load menus when definition is loaded.
+  // Gated on has_definition (not just connection) because the menu tree is
+  // built from the INI definition, and on a signature mismatch we deliberately
+  // keep the old UI rather than rebuilding against a non-matching INI.
+  // Constants are fetched first because some menu entries' labels/visibility
+  // depend on constant values, so they must be in hand before building the tree.
   useEffect(() => {
     if (status.has_definition) {
       fetchConstants().then((values) => {

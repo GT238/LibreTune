@@ -119,7 +119,9 @@ fn strip_status_byte(payload: &[u8], expected_data_len: usize, label: &str) -> V
         // Don't error — just return the full payload; channel offsets will be relative to byte 0
         tracing::warn!(
             "{} response: unexpected first byte 0x{:02x} (expected_len={}), using full payload",
-            label, payload[0], expected_data_len
+            label,
+            payload[0],
+            expected_data_len
         );
         payload.to_vec()
     }
@@ -449,7 +451,9 @@ impl Connection {
         self.adaptive_timing = Some(timing);
         tracing::info!(
             "Adaptive timing enabled (multiplier={:.1}x, range={}–{}ms)",
-            multiplier, min_ms, max_ms
+            multiplier,
+            min_ms,
+            max_ms
         );
     }
 
@@ -660,7 +664,8 @@ impl Connection {
 
         tracing::debug!(
             "handshake: query_cmd = {:?}, ini_uses_modern = {}",
-            query_cmd, ini_uses_modern
+            query_cmd,
+            ini_uses_modern
         );
 
         let cmd_bytes = parse_command_string(&query_cmd);
@@ -691,10 +696,7 @@ impl Connection {
                 };
 
                 let signature = String::from_utf8_lossy(signature_bytes).trim().to_string();
-                tracing::debug!(
-                    "handshake: CRC success, signature = {:?}",
-                    signature
-                );
+                tracing::debug!("handshake: CRC success, signature = {:?}", signature);
                 return Ok(signature);
             } else {
                 tracing::debug!("handshake: CRC protocol failed, trying legacy");
@@ -714,16 +716,10 @@ impl Connection {
 
         match self.send_raw_command(&[cmd_byte]) {
             Ok(response) => {
-                tracing::debug!(
-                    "handshake: legacy succeeded, {} bytes",
-                    response.len()
-                );
+                tracing::debug!("handshake: legacy succeeded, {} bytes", response.len());
                 self.use_modern_protocol = false;
                 let signature = String::from_utf8_lossy(&response).trim().to_string();
-                tracing::debug!(
-                    "handshake: legacy success, signature = {:?}",
-                    signature
-                );
+                tracing::debug!("handshake: legacy success, signature = {:?}", signature);
                 Ok(signature)
             }
             Err(e) => {
@@ -872,9 +868,7 @@ impl Connection {
             } else {
                 // We have some data - check inter-character timeout
                 if last_data_time.elapsed() > inter_char_timeout {
-                    tracing::debug!(
-                        "send_raw_command: inter-character timeout, message complete"
-                    );
+                    tracing::debug!("send_raw_command: inter-character timeout, message complete");
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(poll_interval));
@@ -932,10 +926,7 @@ impl Connection {
         let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
         let bytes = packet.to_bytes();
 
-        tracing::debug!(
-            "send_packet_no_response: sending {} bytes",
-            bytes.len()
-        );
+        tracing::debug!("send_packet_no_response: sending {} bytes", bytes.len());
 
         self.tx_bytes = self.tx_bytes.saturating_add(bytes.len() as u64);
         self.tx_packets = self.tx_packets.saturating_add(1);
@@ -1591,7 +1582,10 @@ impl Connection {
                         }
                         tracing::warn!(
                             "write_page: transient error on page {} offset {} (attempt {}): {}",
-                            page, offset, attempt + 1, msg
+                            page,
+                            offset,
+                            attempt + 1,
+                            msg
                         );
                         self.clear_rx_buffer();
                         std::thread::sleep(Duration::from_millis(50 * (attempt as u64 + 1)));
@@ -1622,7 +1616,8 @@ impl Connection {
                 if prev_page != params.page {
                     tracing::info!(
                         "auto-burn: page change {} -> {}, burning previous page first",
-                        prev_page, params.page
+                        prev_page,
+                        params.page
                     );
                     self.burn(BurnParams {
                         page: prev_page,
@@ -1692,10 +1687,7 @@ impl Connection {
 
         // Empty burn command means page is not burnable (already in flash or read-only)
         if burn_format.is_empty() {
-            tracing::debug!(
-                "burn: page {} has empty burn command, skipping",
-                page
-            );
+            tracing::debug!("burn: page {} has empty burn command, skipping", page);
             return Ok(());
         }
 
@@ -1706,7 +1698,9 @@ impl Connection {
 
         tracing::debug!(
             "burn: sending burn command for page {}, format='{}', cmd = {:02x?}",
-            page, burn_format, cmd
+            page,
+            burn_format,
+            cmd
         );
 
         // Send burn command WITHOUT waiting for response
@@ -1730,10 +1724,7 @@ impl Connection {
             .map(|p| p.page_activation_delay.max(2000))
             .unwrap_or(2000);
 
-        tracing::debug!(
-            "burn: waiting {}ms for flash write to complete",
-            delay
-        );
+        tracing::debug!("burn: waiting {}ms for flash write to complete", delay);
         std::thread::sleep(Duration::from_millis(delay as u64));
 
         tracing::debug!("burn: flash write complete for page {}", page);
@@ -1845,10 +1836,7 @@ impl Connection {
             let available = match channel.bytes_to_read() {
                 Ok(n) => n,
                 Err(e) => {
-                    tracing::debug!(
-                        "send_raw_bytes_with_response: bytes_to_read error: {}",
-                        e
-                    );
+                    tracing::debug!("send_raw_bytes_with_response: bytes_to_read error: {}", e);
                     if !response.is_empty() {
                         break;
                     }
@@ -1907,7 +1895,8 @@ impl Connection {
     ) -> Result<String, ProtocolError> {
         tracing::debug!(
             "send_console_command: sending '{}' (modern={})",
-            cmd.command, self.use_modern_protocol
+            cmd.command,
+            self.use_modern_protocol
         );
 
         if self.use_modern_protocol {
@@ -2012,7 +2001,8 @@ impl Connection {
                         empty_polls += 1;
                         tracing::debug!(
                             "send_console_command_modern: poll {} empty (empty_count={})",
-                            poll_idx, empty_polls
+                            poll_idx,
+                            empty_polls
                         );
                         // If we already have text and get an empty poll, output is complete
                         if !collected_text.is_empty() || empty_polls >= 2 {
@@ -2036,7 +2026,8 @@ impl Connection {
                 Err(e) => {
                     tracing::warn!(
                         "send_console_command_modern: 'G' poll {} failed: {:?}",
-                        poll_idx, e
+                        poll_idx,
+                        e
                     );
                     // If we already have some text, return what we have
                     if !collected_text.is_empty() {
@@ -2085,7 +2076,8 @@ impl Connection {
                     };
                     tracing::debug!(
                         "drain_text_buffer: poll {} drained {} bytes",
-                        drain_idx, data_len
+                        drain_idx,
+                        data_len
                     );
                     if data_len == 0 {
                         break; // Buffer is empty
@@ -2094,10 +2086,7 @@ impl Connection {
                     std::thread::sleep(Duration::from_millis(30));
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "drain_text_buffer: poll {} failed: {:?}",
-                        drain_idx, e
-                    );
+                    tracing::warn!("drain_text_buffer: poll {} failed: {:?}", drain_idx, e);
                     break;
                 }
             }
@@ -2234,10 +2223,7 @@ impl Connection {
             let available = match channel.bytes_to_read() {
                 Ok(n) => n,
                 Err(e) => {
-                    tracing::debug!(
-                        "send_console_command_legacy: bytes_to_read error: {}",
-                        e
-                    );
+                    tracing::debug!("send_console_command_legacy: bytes_to_read error: {}", e);
                     return Err(ProtocolError::SerialError(e.to_string()));
                 }
             };

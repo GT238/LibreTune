@@ -332,18 +332,14 @@ signature = "1234"
     );
 }
 
-/// Integrated test for Repository Scanner bug
-/// Ensures INI files with comments on section headers are correctly identified
-#[test]
-fn test_repository_extraction_with_comments() {
-
-    // We cannot access private static methods of IniRepository directly.
-    // However, if we can trigger the same logic path...
-    // Actually, since we already verified with a standalone test,
-    // and fixed the code, maybe we don't need to append to ini_parsing.rs
-    // because IniRepository is in a different module (project).
-    // Let's create a permanent test file for repository instead.
-}
+// NOTE: An empty placeholder test `test_repository_extraction_with_comments`
+// previously lived here but was removed. It had no assertions: its own body
+// explained that the target logic lives in `IniRepository` (a private method
+// in the `project` module) and so cannot be reached from this public-API
+// test file. Repository scanning is covered by tests in
+// `crates/libretune-core/src/project/repository.rs` instead. If repository
+// scanning behaviour needs a black-box integration test, add it there rather
+// than leaving an empty stub here.
 
 // ---------------------------------------------------------------------------
 // Encoding tests (issue #42 / PR #43)

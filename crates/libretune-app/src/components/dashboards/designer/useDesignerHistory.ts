@@ -37,6 +37,10 @@ export function useDesignerHistory({
       })
     : null;
 
+  // Standard editor undo semantics: a new change discards any redo future.
+  // `historyIndex` closes over the current value, so this callback is rebuilt
+  // whenever historyIndex changes (see the dep array) — keep that dep or the
+  // slice will be off by one after an undo.
   const pushHistory = useCallback(
     (newFile: DashFile, description: string) => {
       setHistory((prev) => {
@@ -83,12 +87,20 @@ export function useDesignerHistory({
 
   const copy = useCallback(() => {
     if (!selectedComponent) return;
+    // Deep clone via JSON so the clipboard is fully independent of the live
+    // component. DashComponent is a nested discriminated union (Gauge/Indicator
+    // with their own config objects); a shallow copy would alias those nested
+    // objects and later edits to the original would mutate the clipboard.
     setClipboard(JSON.parse(JSON.stringify(selectedComponent)));
   }, [selectedComponent]);
 
   const paste = useCallback(() => {
     if (!clipboard) return;
 
+    // Pasted component gets a fresh id (timestamp-based, effectively unique)
+    // and is nudged +0.05 in both axes so it doesn't sit exactly on top of the
+    // original — a common dashboard-editor convention so the user sees the
+    // paste happened and can drag it into place.
     let newComponent: DashComponent;
     if (isGauge(clipboard)) {
       const gauge = clipboard.Gauge;
