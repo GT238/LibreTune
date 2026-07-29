@@ -23,14 +23,18 @@ pub async fn merge_from_tune(
     let source =
         TuneFile::load(&source_path).map_err(|e| format!("Failed to load source tune: {}", e))?;
 
+    // Lock order: definition, then tune_cache, then current_tune — matching the
+    // convention used everywhere else these are held together (avoids an AB-BA
+    // deadlock against e.g. get_table_data/get_all_constant_values). Acquired
+    // upfront even though cache/def are only used conditionally below.
+    let def_guard = state.definition.lock().await;
+    let mut cache_guard = state.tune_cache.lock().await;
     let mut tune_guard = state.current_tune.lock().await;
     let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
 
     let merged = TuneDiff::merge_selected(tune, &source, &constant_names);
 
     if merged > 0 {
-        let mut cache_guard = state.tune_cache.lock().await;
-        let def_guard = state.definition.lock().await;
         if let (Some(cache), Some(def)) = (cache_guard.as_mut(), def_guard.as_ref()) {
             for name in &constant_names {
                 if let Some(value) = source.constants.get(name) {

@@ -66,11 +66,18 @@ pub async fn start_tooth_logger(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<ToothLogResult, String> {
-    let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    // Just confirming a definition is loaded — drop the lock immediately
+    // rather than holding it across the blocking ECU read below, which would
+    // starve every other command that needs the definition (e.g. load_tune).
+    {
+        let def_guard = state.definition.lock().await;
+        if def_guard.is_none() {
+            return Err("Definition not loaded".to_string());
+        }
+    }
 
+    let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
-    let _def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     // Detect ECU type from signature
     let signature = conn.signature().unwrap_or_default().to_lowercase();
@@ -274,11 +281,18 @@ pub async fn start_composite_logger(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<CompositeLogResult, String> {
-    let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    // Just confirming a definition is loaded — drop the lock immediately
+    // rather than holding it across the blocking ECU read below, which would
+    // starve every other command that needs the definition (e.g. load_tune).
+    {
+        let def_guard = state.definition.lock().await;
+        if def_guard.is_none() {
+            return Err("Definition not loaded".to_string());
+        }
+    }
 
+    let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
-    let _def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let signature = conn.signature().unwrap_or_default().to_lowercase();
 

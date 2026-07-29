@@ -213,8 +213,11 @@ pub async fn get_curve_data(
     }
 
     // Get tune and connection
-    let tune_guard = state.current_tune.lock().await;
+    // Lock order: connection before current_tune, matching the convention used
+    // by every write path (get_constant_value, update_constant, etc.) — the
+    // reverse order deadlocks against those.
     let mut conn_guard = state.connection.lock().await;
+    let tune_guard = state.current_tune.lock().await;
     let mut conn = conn_guard.as_mut();
 
     let x_bins = read_const_from_source(&x_const, tune_guard.as_ref(), &mut conn, endianness)?;

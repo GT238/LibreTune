@@ -9,10 +9,13 @@ pub async fn save_tune(
     state: tauri::State<'_, AppState>,
     path: Option<String>,
 ) -> Result<String, String> {
+    // Lock order: definition, then tune_cache, then current_tune — matching the
+    // convention used everywhere else these are held together (avoids an AB-BA
+    // deadlock against e.g. get_table_data/get_all_constant_values).
+    let def_guard = state.definition.lock().await;
+    let cache_guard = state.tune_cache.lock().await;
     let mut tune_guard = state.current_tune.lock().await;
     let path_guard = state.current_tune_path.lock().await;
-    let cache_guard = state.tune_cache.lock().await;
-    let def_guard = state.definition.lock().await;
 
     let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;

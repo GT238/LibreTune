@@ -194,9 +194,14 @@ pub async fn get_table_data(
     }
 
     // Get tune, cache and connection
-    let tune_guard = state.current_tune.lock().await;
-    let cache_guard = state.tune_cache.lock().await;
+    // Lock order: connection, then tune_cache, then current_tune — matching the
+    // convention used by every write path (get_constant_value, update_constant,
+    // table/curve edits, sync_ecu_data). Acquiring connection last (as this used
+    // to) deadlocks against those. Acquiring tune_cache before current_tune
+    // matches get_all_constant_values, avoiding that separate AB-BA cycle too.
     let mut conn_guard = state.connection.lock().await;
+    let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
     let mut conn = conn_guard.as_mut();
 
     let x_bins = read_const_from_source(
