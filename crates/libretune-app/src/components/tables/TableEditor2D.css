@@ -73,6 +73,12 @@
   width: 100%;
   height: 100%;
   overflow: auto;
+  /* Reserve scrollbar gutter on both axes so scrollbars appearing/disappearing
+     don't change clientWidth/clientHeight. Without this, the fitViewport
+     ResizeObserver measure() oscillates: grid overflows by ~2px (container
+     border) -> scrollbar appears -> clientWidth shrinks -> refit smaller ->
+     scrollbar vanishes -> clientWidth snaps back -> overflow again -> loop. */
+  scrollbar-gutter: stable both-edges;
 }
 
 .table-editor-2d .table-grid-container--fit-ve {
