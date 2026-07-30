@@ -25,7 +25,7 @@ pub use error::IniError;
 pub use gauges::GaugeConfig;
 pub use inc_tables::{IncTable, IncTableCache};
 pub use output_channels::OutputChannel;
-pub use tables::{CurveDefinition, TableDefinition, TableType};
+pub use tables::{CurveDefinition, TableDefinition, TableRole, TableType};
 pub use types::*;
 
 use std::collections::HashMap;
@@ -213,6 +213,68 @@ impl EcuDefinition {
             return self.tables.get(table_name);
         }
         None
+    }
+
+    /// Populate [`TableDefinition::role`] for every table in this definition,
+    /// using the INI's `[VeAnalyze]` and `[WueAnalyze]` configuration as the
+    /// source of truth.
+    ///
+    /// This is the recommended way to attach machine-readable roles so that
+    /// automation (e.g. the AI assistant) can tell a VE table from an ignition
+    /// table without guessing from names. Should be called once after the INI
+    /// is fully parsed (both `[TableEditor]` and the analyze sections). Safe
+    /// to call more than once. Tables not referenced by any analyze config
+    /// are left as [`TableRole::Other`] (their default), with a name-based
+    /// heuristic for ignition tables as a fallback.
+    pub fn infer_table_roles(&mut self) {
+        let mut ve_names: Vec<String> = Vec::new();
+        let mut afr_target_names: Vec<String> = Vec::new();
+        let mut wue_names: Vec<String> = Vec::new();
+
+        if let Some(cfg) = &self.ve_analyze {
+            ve_names.push(cfg.ve_table_name.clone());
+            afr_target_names.push(cfg.target_table_name.clone());
+            afr_target_names.extend(cfg.lambda_target_tables.iter().cloned());
+        }
+        if let Some(cfg) = &self.wue_analyze {
+            wue_names.push(cfg.wue_curve_name.clone());
+            afr_target_names.push(cfg.target_table_name.clone());
+            afr_target_names.extend(cfg.lambda_target_tables.iter().cloned());
+        }
+
+        // Assign roles, taking care not to overwrite a VE role with a weaker
+        // AFR-target role if a name appears in both lists (shouldn't happen
+        // in practice, but be defensive).
+        for table in self.tables.values_mut() {
+            let canonical_name = &table.name;
+            let map_name = table.map_name.as_deref();
+
+            // A table matches a candidate name if either its canonical name
+            // or its map_name equals the candidate.
+            let matches_any = |names: &[String]| {
+                names.iter().any(|n| {
+                    n == canonical_name || map_name == Some(n.as_str())
+                })
+            };
+
+            if matches_any(&ve_names) {
+                table.role = TableRole::Ve;
+            } else if matches_any(&afr_target_names) {
+                table.role = TableRole::AfrTarget;
+            } else if matches_any(&wue_names) {
+                table.role = TableRole::WarmupEnrichment;
+            } else {
+                // Name-based fallback for ignition tables, since most INIs do
+                // not have an ignition analyze section. Conservative: only
+                // match obvious names so we don't mislabel.
+                let lname = canonical_name.to_lowercase();
+                if lname.contains("ign") || lname.contains("spark") || lname.contains("advance") {
+                    table.role = TableRole::Ignition;
+                } else {
+                    table.role = TableRole::Other;
+                }
+            }
+        }
     }
 
     /// Get a curve definition by name or map_name

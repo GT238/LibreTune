@@ -43,11 +43,17 @@ mod tests {
             help: None,
             x_label: None,
             y_label: None,
+            ..Default::default()
         };
         def.tables.insert("veTable1".to_string(), table);
 
-        // A U16 constant (e.g. rev limit RPM) at page 1, offset 0.
-        let constant = Constant::new("RevLim", 1, 0, DataType::U16);
+        // A U16 constant (e.g. rev limit RPM) at page 1, offset 0. Set a
+        // realistic max so the proposed value below passes the new bounds
+        // check (the validator now enforces Constant.min/max, added for the
+        // AI-assistant feature).
+        let mut constant = Constant::new("RevLim", 1, 0, DataType::U16);
+        constant.max = 10000.0;
+        constant.units = "RPM".to_string();
         def.constants.insert("RevLim".to_string(), constant);
 
         // A controller command that burns the tune to flash (raw byte 'B').

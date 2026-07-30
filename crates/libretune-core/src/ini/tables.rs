@@ -64,6 +64,13 @@ pub struct TableDefinition {
 
     /// Y-axis label (from xyLabels)
     pub y_label: Option<String>,
+
+    /// Functional role of this table, used by the AI assistant and other
+    /// automation to know what a table *does* (e.g. VE table vs ignition
+    /// table vs AFR target) without guessing from its name. Defaults to
+    /// `Other`; populated by `EcuDefinition::infer_table_roles()`.
+    #[serde(default)]
+    pub role: TableRole,
 }
 
 /// Type of table
@@ -73,6 +80,27 @@ pub enum TableType {
     TwoD,
     /// 3D table (two axes)
     ThreeD,
+}
+
+/// Functional role of a table within the ECU tune.
+///
+/// Used by automation (e.g. the AI assistant) to reason about tables without
+/// relying on name heuristics. Inferred from the INI's `[VeAnalyze]` /
+/// `[WueAnalyze]` configuration where available; unknown tables default to
+/// [`TableRole::Other`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TableRole {
+    /// Volumetric-efficiency (fuel) table — the primary table AutoTune modifies.
+    Ve,
+    /// Ignition / spark-advance table.
+    Ignition,
+    /// AFR / lambda target table used as the closed-loop setpoint.
+    AfrTarget,
+    /// Warm-up enrichment curve.
+    WarmupEnrichment,
+    /// Role could not be determined from the INI definition.
+    #[default]
+    Other,
 }
 
 impl TableDefinition {
@@ -103,6 +131,7 @@ impl TableDefinition {
             help: None,
             x_label: None,
             y_label: None,
+            role: TableRole::default(),
         }
     }
 
@@ -135,6 +164,7 @@ impl TableDefinition {
             help: None,
             x_label: None,
             y_label: None,
+            role: TableRole::default(),
         }
     }
 

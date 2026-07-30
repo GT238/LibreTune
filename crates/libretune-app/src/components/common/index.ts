@@ -22,3 +22,6 @@ export { FormField } from './FormField';
 export type { FormFieldProps } from './FormField';
 
 export { default as ErrorBoundary } from './ErrorBoundary';
+
+export { RiskAcknowledgement } from './RiskAcknowledgement';
+export type { RiskAcknowledgementProps, RiskLevel } from './RiskAcknowledgement';

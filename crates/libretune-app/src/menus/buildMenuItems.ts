@@ -47,6 +47,7 @@ export interface BuildMenuItemsDeps {
   setTuneFileDiffOpen: (open: boolean) => void;
   setDynoOverlayOpen: (open: boolean) => void;
   setPluginPanelOpen: (open: boolean) => void;
+  setAgentDockOpen: (open: boolean) => void;
   setConnectionDialogOpen: (open: boolean) => void;
   setUserManualOpen: (open: boolean) => void;
   setUserManualSection: (section: string | undefined) => void;
@@ -72,7 +73,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
     setNewProjectDialogOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
     setBurnDialogOpen, setFirmwareUpdateDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
     setMathChannelsDialogOpen, setBaseMapDialogOpen, setTableComparisonOpen,
-    setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, setConnectionDialogOpen,
+    setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, setAgentDockOpen, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
     setTheme, setTabs, setTabContents, setActiveTabId,
   } = deps;
@@ -265,6 +266,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
   toolItems.push({ id: "sep4", label: "", separator: true });
   toolItems.push(
     { id: "plugins", label: "&Plugins...", onClick: () => setPluginPanelOpen(true) },
+    { id: "ai-assistant", label: "&AI Assistant...", onClick: () => setAgentDockOpen(true) },
     { id: "connection", label: "&ECU Connection...", onClick: () => setConnectionDialogOpen(true) },
     { id: "settings", label: "&Settings...", onClick: () => setSettingsDialogOpen(true) }
   );

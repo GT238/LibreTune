@@ -256,7 +256,10 @@ function AppContent() {
   
   // WASM Plugin panel state
   const [pluginPanelOpen, setPluginPanelOpen] = useState(false);
-  
+
+  // AI assistant dock state
+  const [agentDockOpen, setAgentDockOpen] = useState(false);
+
   // Sync status tracking (for partial sync warning)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
 
@@ -1329,7 +1332,7 @@ function AppContent() {
     setNewProjectDialogOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
     setBurnDialogOpen, setFirmwareUpdateDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
     setMathChannelsDialogOpen, setBaseMapDialogOpen, setTableComparisonOpen,
-    setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, setConnectionDialogOpen,
+    setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, setAgentDockOpen, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
     setTheme, setTabs, setTabContents, setActiveTabId,
   }), [backendMenus, theme, sidebarVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs]);
@@ -1622,6 +1625,8 @@ function AppContent() {
         setOnboardingOpen={setOnboardingOpen}
         pluginPanelOpen={pluginPanelOpen}
         setPluginPanelOpen={setPluginPanelOpen}
+        agentDockOpen={agentDockOpen}
+        setAgentDockOpen={setAgentDockOpen}
       />
     </>
   );

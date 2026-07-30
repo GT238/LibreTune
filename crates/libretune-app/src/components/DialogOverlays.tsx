@@ -28,6 +28,7 @@ import TuneHistoryPanel from "./TuneHistoryPanel";
 import ErrorDetailsDialog from "./dialogs/ErrorDetailsDialog";
 import OnboardingDialog from "./dialogs/OnboardingDialog";
 import { PluginPanel } from "./PluginPanel";
+import { AgentDock } from "./agent/AgentDock";
 import { ControllerCommandDialog } from "./console/ControllerCommandDialog";
 import { FirmwareUpdateDialog } from "./dialogs/FirmwareUpdateDialog";
 import { ThemeName } from "../themes";
@@ -186,6 +187,10 @@ export interface DialogOverlaysProps {
   // Plugins
   pluginPanelOpen: boolean;
   setPluginPanelOpen: (v: boolean) => void;
+
+  // AI assistant
+  agentDockOpen: boolean;
+  setAgentDockOpen: (v: boolean) => void;
 }
 
 export function DialogOverlays(props: DialogOverlaysProps) {
@@ -228,6 +233,7 @@ export function DialogOverlays(props: DialogOverlaysProps) {
     migrationReportOpen, setMigrationReportOpen,
     onboardingOpen, setOnboardingOpen,
     pluginPanelOpen, setPluginPanelOpen,
+    agentDockOpen, setAgentDockOpen,
   } = props;
 
   return (
@@ -447,6 +453,45 @@ export function DialogOverlays(props: DialogOverlaysProps) {
             style={{ width: '900px', maxWidth: '95vw', height: '600px', maxHeight: '85vh' }}
           >
             <PluginPanel isConnected={status.state === "Connected"} />
+          </div>
+        </div>
+      )}
+      {agentDockOpen && (
+        <div className="dialog-overlay" onClick={() => setAgentDockOpen(false)}>
+          <div
+            className="dialog-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '760px',
+              maxWidth: '95vw',
+              height: '640px',
+              maxHeight: '85vh',
+              padding: '14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '4px',
+              }}
+            >
+              <h3 style={{ margin: 0 }}>AI Assistant</h3>
+              <button
+                onClick={() => setAgentDockOpen(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <AgentDock />
+            </div>
           </div>
         </div>
       )}

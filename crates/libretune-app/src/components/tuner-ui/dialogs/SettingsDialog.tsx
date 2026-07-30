@@ -8,7 +8,7 @@ import { createFocusTrap, focusFirstElement } from '../../../utils/focusManageme
 import HotkeyEditor from '../../dialogs/HotkeyEditor';
 import ThemePicker from '../../dialogs/ThemePicker';
 import StatusBarChannelSelector from '../../dialogs/StatusBarChannelSelector';
-import { Dialog, Button, FormField } from '../../common';
+import { Dialog, Button, FormField, RiskAcknowledgement } from '../../common';
 import { ThemeName } from '../../../themes';
 import { SUPPORTED_LANGUAGES, LANGUAGE_STORAGE_KEY, type SupportedLanguageCode } from '../../../i18n/languages';
 import ConnectionMetrics from '../../layout/ConnectionMetrics';
@@ -81,6 +81,15 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [autoCommitOnSave, setAutoCommitOnSave] = useState('never');
   const [commitMessageFormat, setCommitMessageFormat] = useState('Tune saved on {date} at {time}');
   const [runtimePacketMode, setRuntimePacketMode] = useState<'Auto'|'ForceBurst'|'ForceOCH'|'Disabled'>('Auto');
+
+  // AI assistant settings (bring-your-own LLM). All gated on the risk ack.
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiRiskAcked, setAiRiskAcked] = useState(false);
+  const [aiProvider, setAiProvider] = useState('openai');
+  const [aiBaseUrl, setAiBaseUrl] = useState('');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('');
+  const [aiCapabilityTier, setAiCapabilityTier] = useState<'read' | 'tune' | 'config'>('read');
   // Auto-reconnect setting: whether to automatically sync & reconnect after controller commands
   const [autoReconnectAfterControllerCommand, setAutoReconnectAfterControllerCommand] = useState<boolean>(true);
   const [autoReconnectAfterFirmware, setAutoReconnectAfterFirmware] = useState<boolean>(true);
@@ -152,6 +161,14 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         if (settings.auto_commit_on_save !== undefined) setAutoCommitOnSave(settings.auto_commit_on_save);
         if (settings.commit_message_format !== undefined) setCommitMessageFormat(settings.commit_message_format);
         if (settings.runtime_packet_mode !== undefined) setRuntimePacketMode(settings.runtime_packet_mode);
+        // AI assistant settings
+        if (settings.ai_assistant_enabled !== undefined) setAiEnabled(settings.ai_assistant_enabled);
+        if (settings.ai_risk_acknowledged !== undefined) setAiRiskAcked(settings.ai_risk_acknowledged);
+        if (settings.ai_provider !== undefined) setAiProvider(settings.ai_provider);
+        if (settings.ai_base_url !== undefined) setAiBaseUrl(settings.ai_base_url);
+        if (settings.ai_api_key !== undefined) setAiApiKey(settings.ai_api_key);
+        if (settings.ai_model !== undefined) setAiModel(settings.ai_model);
+        if (settings.ai_capability_tier !== undefined) setAiCapabilityTier(settings.ai_capability_tier);
         if (settings.auto_reconnect_after_controller_command !== undefined) setAutoReconnectAfterControllerCommand(!!settings.auto_reconnect_after_controller_command);
         if (settings.auto_reconnect_after_firmware !== undefined) setAutoReconnectAfterFirmware(!!settings.auto_reconnect_after_firmware);
         // Auto-record settings
@@ -324,6 +341,16 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     await invoke('update_setting', { key: 'commit_message_format', value: commitMessageFormat });
     // Update runtime packet mode
     await invoke('update_setting', { key: 'runtime_packet_mode', value: runtimePacketMode });
+    // Update AI assistant settings. Order matters: ack first, then enable,
+    // so the backend's enable-guards pass. Provider/key changes reset ack on
+    // the backend side; we re-send ack after to keep them consistent.
+    await invoke('update_setting', { key: 'ai_provider', value: aiProvider });
+    await invoke('update_setting', { key: 'ai_base_url', value: aiBaseUrl });
+    await invoke('update_setting', { key: 'ai_api_key', value: aiApiKey });
+    await invoke('update_setting', { key: 'ai_model', value: aiModel });
+    await invoke('update_setting', { key: 'ai_capability_tier', value: aiCapabilityTier });
+    await invoke('update_setting', { key: 'ai_risk_acknowledged', value: aiRiskAcked.toString() });
+    await invoke('update_setting', { key: 'ai_assistant_enabled', value: aiEnabled.toString() });
     await invoke('update_setting', { key: 'auto_reconnect_after_controller_command', value: autoReconnectAfterControllerCommand.toString() });
     await invoke('update_setting', { key: 'auto_reconnect_after_firmware', value: autoReconnectAfterFirmware.toString() });
     // Update auto-record settings
@@ -748,6 +775,111 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
                 onChange={(e) => setCommitMessageFormat(e.target.value)}
                 style={{ fontFamily: 'monospace' }}
               />
+            )}
+          </FormField>
+
+          <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>AI Assistant (at your own risk)</h3>
+          <span className="dialog-form-note">
+            Bring your own LLM provider. The assistant only ever <strong>proposes</strong> changes for
+            your explicit approval — nothing is burned to the ECU automatically.
+          </span>
+
+          <FormField label="Enable AI Assistant" help="Requires acknowledging the risk warning below">
+            {(id) => (
+              <label className="dialog-checkbox-option" style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={aiEnabled}
+                  onChange={(e) => setAiEnabled(e.target.checked)}
+                  disabled={!aiRiskAcked}
+                />
+                <span>{aiEnabled ? 'Enabled' : 'Disabled'}{!aiRiskAcked ? ' (acknowledge risk first)' : ''}</span>
+              </label>
+            )}
+          </FormField>
+
+          <RiskAcknowledgement
+            acknowledged={aiRiskAcked}
+            onAcknowledgedChange={setAiRiskAcked}
+            risk="high"
+            label="At your own risk"
+            warning={
+              <>
+                The assistant sends tune/configuration data to the configured LLM provider and may
+                propose changes that alter engine behavior. Proposals are validated and clamped, but
+                a storable value can still be <em>wrong</em> (e.g. pin assignments). You must review
+                every proposal before it is staged, and burning to the ECU is always a separate manual
+                step. You assume all risk.
+              </>
+            }
+            acknowledgementText="I understand the assistant only proposes changes, that I must approve them, and that I am responsible for verifying every change before it is applied or burned."
+          />
+
+          <FormField label="Provider" help="OpenAI = most hosted/local-compatible endpoints; Anthropic & Google are native protocols">
+            {(id) => (
+              <select
+                id={id}
+                value={aiProvider}
+                onChange={(e) => setAiProvider(e.target.value)}
+              >
+                <option value="openai">OpenAI (and compatible: OpenRouter, Ollama, LM Studio)</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="google">Google (Gemini)</option>
+              </select>
+            )}
+          </FormField>
+
+          <FormField label="Base URL" help="Leave empty for the provider default. For local models use e.g. http://localhost:11434/v1 (Ollama)">
+            {(id) => (
+              <input
+                id={id}
+                type="text"
+                value={aiBaseUrl}
+                onChange={(e) => setAiBaseUrl(e.target.value)}
+                placeholder="(provider default)"
+                style={{ fontFamily: 'monospace' }}
+              />
+            )}
+          </FormField>
+
+          <FormField label="API Key" help="Stored locally in settings. Optional for local/no-auth providers">
+            {(id) => (
+              <input
+                id={id}
+                type="password"
+                value={aiApiKey}
+                onChange={(e) => setAiApiKey(e.target.value)}
+                placeholder="sk-..."
+                style={{ fontFamily: 'monospace' }}
+                autoComplete="off"
+              />
+            )}
+          </FormField>
+
+          <FormField label="Model" help="e.g. gpt-4o, claude-3-5-sonnet-20241022, gemini-1.5-pro">
+            {(id) => (
+              <input
+                id={id}
+                type="text"
+                value={aiModel}
+                onChange={(e) => setAiModel(e.target.value)}
+                style={{ fontFamily: 'monospace' }}
+              />
+            )}
+          </FormField>
+
+          <FormField label="Capability Tier" help="The scope the assistant is unlocked for">
+            {(id) => (
+              <select
+                id={id}
+                value={aiCapabilityTier}
+                onChange={(e) => setAiCapabilityTier(e.target.value as 'read' | 'tune' | 'config')}
+              >
+                <option value="read">Read / diagnose only</option>
+                <option value="config">Propose ECU configuration changes</option>
+                <option value="tune">Propose tune edits</option>
+              </select>
             )}
           </FormField>
 
