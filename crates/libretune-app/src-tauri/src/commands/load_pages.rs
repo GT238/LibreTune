@@ -12,8 +12,10 @@ pub async fn load_all_pages(
     // Get pages to load and their sizes
     let pages_to_load: Vec<(u8, u16)>;
     {
-        let cache_guard = state.tune_cache.lock().await;
+        // Lock order: definition before tune_cache, matching the convention used
+        // everywhere else these two are held together (avoids an AB-BA deadlock).
         let def_guard = state.definition.lock().await;
+        let cache_guard = state.tune_cache.lock().await;
 
         let cache = cache_guard.as_ref().ok_or("TuneCache not initialized")?;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;

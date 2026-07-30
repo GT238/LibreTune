@@ -33,18 +33,24 @@ pub async fn send_console_command(
     _app: tauri::AppHandle,
     command: String,
 ) -> Result<String, String> {
-    let mut conn_guard = state.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    // Snapshot the ECU type and drop the definition lock before the blocking
+    // conn.send_console_command() call below — holding it across ECU I/O
+    // starves every other command that needs the definition (e.g. load_tune).
+    let ecu_type = {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
+        def.ecu_type
+    };
 
-    let def_guard = state.definition.lock().await;
-    let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
-
-    if !def.ecu_type.supports_console() {
+    if !ecu_type.supports_console() {
         return Err(format!(
             "ECU type {:?} does not support text-based console",
-            def.ecu_type
+            ecu_type
         ));
     }
+
+    let mut conn_guard = state.connection.lock().await;
+    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
 
     let response = conn
         .send_console_command(&libretune_core::protocol::ConsoleCommand::new(&command))

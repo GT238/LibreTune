@@ -77,17 +77,21 @@ pub async fn get_constant_string_value(
     state: tauri::State<'_, AppState>,
     name: String,
 ) -> Result<String, String> {
-    let mut conn_guard = state.connection.lock().await;
+    // Snapshot the constant and drop the definition lock before any ECU I/O
+    // below — holding it across a blocking conn.read_memory() call starves
+    // every other command that needs the definition (e.g. load_tune).
     let def_guard = state.definition.lock().await;
-    let tune_guard = state.current_tune.lock().await;
-
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    let conn = conn_guard.as_mut();
-
     let constant = def
         .constants
         .get(&name)
-        .ok_or_else(|| format!("Constant {} not found", name))?;
+        .ok_or_else(|| format!("Constant {} not found", name))?
+        .clone();
+    drop(def_guard);
+
+    let mut conn_guard = state.connection.lock().await;
+    let tune_guard = state.current_tune.lock().await;
+    let conn = conn_guard.as_mut();
 
     // For string type, read the raw bytes and convert to UTF-8 string
     if constant.data_type != DataType::String {
@@ -146,18 +150,25 @@ pub async fn get_constant_value(
     state: tauri::State<'_, AppState>,
     name: String,
 ) -> Result<f64, String> {
-    let mut conn_guard = state.connection.lock().await;
+    // Snapshot the constant (and its INI default, for the PC-variable path)
+    // and drop the definition lock before any ECU I/O below — holding it
+    // across a blocking conn.read_memory() call starves every other command
+    // that needs the definition (e.g. load_tune).
     let def_guard = state.definition.lock().await;
-    let cache_guard = state.tune_cache.lock().await;
-    let tune_guard = state.current_tune.lock().await;
-
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    let conn = conn_guard.as_mut();
-
     let constant = def
         .constants
         .get(&name)
-        .ok_or_else(|| format!("Constant {} not found", name))?;
+        .ok_or_else(|| format!("Constant {} not found", name))?
+        .clone();
+    let default_value = def.default_values.get(&name).copied();
+    let endianness = def.endianness;
+    drop(def_guard);
+
+    let mut conn_guard = state.connection.lock().await;
+    let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
+    let conn = conn_guard.as_mut();
 
     // PC variables are stored locally, not on ECU
     if constant.is_pc_variable {
@@ -168,7 +179,7 @@ pub async fn get_constant_value(
             }
         }
         // Fall back to default value from INI
-        if let Some(&default_val) = def.default_values.get(&name) {
+        if let Some(default_val) = default_value {
             return Ok(default_val);
         }
         // Last resort: use min value or 0
@@ -345,10 +356,7 @@ pub async fn get_constant_value(
         };
 
         let raw_data = conn.read_memory(params).map_err(|e| e.to_string())?;
-        if let Some(raw_val) = constant
-            .data_type
-            .read_from_bytes(&raw_data, 0, def.endianness)
-        {
+        if let Some(raw_val) = constant.data_type.read_from_bytes(&raw_data, 0, endianness) {
             return Ok(constant.raw_to_display(raw_val));
         }
         return Ok(0.0);
@@ -357,10 +365,7 @@ pub async fn get_constant_value(
     // If offline, read from cache (MSQ data)
     if let Some(cache) = cache_guard.as_ref() {
         if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
-            if let Some(raw_val) = constant
-                .data_type
-                .read_from_bytes(raw_data, 0, def.endianness)
-            {
+            if let Some(raw_val) = constant.data_type.read_from_bytes(raw_data, 0, endianness) {
                 return Ok(constant.raw_to_display(raw_val));
             }
         }

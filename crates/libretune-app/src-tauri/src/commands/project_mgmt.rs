@@ -11,6 +11,10 @@ use crate::{ConnectionSettingsResponse, CurrentProjectInfo};
 /// Returns: Nothing on success
 #[tauri::command]
 pub async fn close_project(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // Lock order: definition before current_project, matching apply_base_map —
+    // avoids an AB-BA deadlock against it.
+    let mut def_guard = state.definition.lock().await;
+
     // Get and close the project
     let mut proj_guard = state.current_project.lock().await;
     if let Some(project) = proj_guard.take() {
@@ -20,7 +24,6 @@ pub async fn close_project(state: tauri::State<'_, AppState>) -> Result<(), Stri
     }
 
     // Clear definition
-    let mut def_guard = state.definition.lock().await;
     *def_guard = None;
 
     // Clear tune

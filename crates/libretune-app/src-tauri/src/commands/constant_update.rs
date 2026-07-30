@@ -8,16 +8,27 @@ pub async fn update_constant(
     name: String,
     value: f64,
 ) -> Result<(), String> {
-    let mut conn_guard = state.connection.lock().await;
+    // Snapshot only what we need from the definition, then drop the lock before
+    // doing any ECU I/O below. Holding `state.definition` across a blocking
+    // conn.read_memory()/write_memory() call starves every other command that
+    // needs the definition (e.g. load_tune) if the ECU I/O stalls.
     let def_guard = state.definition.lock().await;
-    let mut cache_guard = state.tune_cache.lock().await;
-
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-
     let constant = def
         .constants
         .get(&name)
-        .ok_or_else(|| format!("Constant {} not found", name))?;
+        .ok_or_else(|| format!("Constant {} not found", name))?
+        .clone();
+    let endianness = def.endianness;
+    let default_page_bytes = def
+        .page_sizes
+        .get(constant.page as usize)
+        .copied()
+        .unwrap_or(256) as usize;
+    drop(def_guard);
+
+    let mut conn_guard = state.connection.lock().await;
+    let mut cache_guard = state.tune_cache.lock().await;
 
     // PC variables are stored locally, not on ECU
     if constant.is_pc_variable {
@@ -120,15 +131,10 @@ pub async fn update_constant(
         let mut tune_guard = state.current_tune.lock().await;
         if let Some(tune) = tune_guard.as_mut() {
             // Update page data
-            let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                vec![
-                    0u8;
-                    def.page_sizes
-                        .get(constant.page as usize)
-                        .copied()
-                        .unwrap_or(256) as usize
-                ]
-            });
+            let page_data = tune
+                .pages
+                .entry(constant.page)
+                .or_insert_with(|| vec![0u8; default_page_bytes]);
             let start = read_offset as usize;
             let end = start + existing_bytes.len();
             if end <= page_data.len() {
@@ -168,7 +174,7 @@ pub async fn update_constant(
     let mut raw_data = vec![0u8; constant.size_bytes()];
     constant
         .data_type
-        .write_to_bytes(&mut raw_data, 0, raw_val, def.endianness);
+        .write_to_bytes(&mut raw_data, 0, raw_val, endianness);
 
     // Always write to TuneCache if available (enables offline editing)
     if let Some(cache) = cache_guard.as_mut() {
@@ -177,16 +183,10 @@ pub async fn update_constant(
             let mut tune_guard = state.current_tune.lock().await;
             if let Some(tune) = tune_guard.as_mut() {
                 // Get or create page data
-                let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                    // Create empty page if it doesn't exist
-                    vec![
-                        0u8;
-                        def.page_sizes
-                            .get(constant.page as usize)
-                            .copied()
-                            .unwrap_or(256) as usize
-                    ]
-                });
+                let page_data = tune
+                    .pages
+                    .entry(constant.page)
+                    .or_insert_with(|| vec![0u8; default_page_bytes]);
 
                 // Update the page data
                 let start = constant.offset as usize;

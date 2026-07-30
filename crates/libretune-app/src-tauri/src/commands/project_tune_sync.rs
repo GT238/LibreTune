@@ -99,8 +99,10 @@ pub async fn write_project_tune_to_ecu(
     _app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let project_guard = state.current_project.lock().await;
+    // Lock order: definition before current_project, matching apply_base_map —
+    // avoids an AB-BA deadlock against it.
     let def_guard = state.definition.lock().await;
+    let project_guard = state.current_project.lock().await;
 
     let project = project_guard.as_ref().ok_or("No project open")?;
     let _def = def_guard.as_ref().ok_or("Definition not loaded")?;
