@@ -101,6 +101,26 @@ until the value changes.
 2. Verify table is editable (not read-only)
 3. Check INI defines table as writable
 
+### VE Table Flickers / Twitches
+
+**Symptoms**: The VE table grid visibly jitters a few times per second;
+horizontal/vertical scrollbars flash on and off around the table; resizing
+the window or the panel makes it stop or get worse.
+
+**Cause**: The VE table is the only table rendered in "fit viewport" mode
+(it sizes its cells to fill the available panel space). A measure → overflow →
+scrollbar → re-measure feedback loop caused the grid to overshoot its host
+by ~2px (the grid container's border), which toggled the scrollbars on and
+off every animation frame.
+
+**Solutions**:
+1. This is fixed in current builds — the fit math now accounts for the grid
+   border, and the host reserves a stable scrollbar gutter so `clientWidth`/
+   `clientHeight` can't change when scrollbars toggle.
+2. If you still see it on an older build, update to the latest nightly.
+3. If it recurs on a *non*-VE table (which use fixed cell sizing), it is a
+   different issue — please report it with the table name.
+
 ## AutoTune Issues
 
 ### No Recommendations

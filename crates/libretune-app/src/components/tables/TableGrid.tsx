@@ -359,6 +359,15 @@ export default function TableGrid({
       const availH = host.clientHeight;
       if (availW < 32 || availH < 32 || x_size < 1 || y_size < 1) return;
 
+      // The grid container has a 1px border on every side (2px total per
+      // axis). If we fit columns/rows to the raw clientWidth/clientHeight,
+      // the border pushes the grid 2px past the host -> a scrollbar appears
+      // -> clientWidth shrinks -> ResizeObserver refits -> scrollbar vanishes
+      // -> clientWidth snaps back -> overflow again. That oscillation is the
+      // visible "twitch". Subtract the border so the fit never overflows.
+      const fitW = availW - 2;
+      const fitH = availH - 2;
+
       const minCol = 22;
       const minRow = 16;
       const minAxis = 28;
@@ -366,16 +375,16 @@ export default function TableGrid({
       const preferredRow = 32;
       const preferredAxis = compact ? 52 : 44;
 
-      let col = Math.floor((availW - minAxis) / x_size);
+      let col = Math.floor((fitW - minAxis) / x_size);
       col = Math.max(minCol, Math.min(preferredCol, col));
-      let axis = Math.floor(availW - col * x_size);
+      let axis = Math.floor(fitW - col * x_size);
       axis = Math.max(minAxis, Math.min(preferredAxis, axis));
-      if (axis + col * x_size > availW) {
-        col = Math.max(minCol, Math.floor((availW - minAxis) / x_size));
-        axis = Math.max(minAxis, availW - col * x_size);
+      if (axis + col * x_size > fitW) {
+        col = Math.max(minCol, Math.floor((fitW - minAxis) / x_size));
+        axis = Math.max(minAxis, fitW - col * x_size);
       }
 
-      let row = Math.floor(availH / (y_size + 1));
+      let row = Math.floor(fitH / (y_size + 1));
       row = Math.max(minRow, Math.min(preferredRow, row));
 
       setFitPx((prev) =>

@@ -13,6 +13,30 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-07-29 — Fix VE table scrollbar-twitch oscillation
+
+The VE table (the only table rendered in "fit viewport" mode, where cell
+sizes are computed to fill the available panel space) visibly jittered a few
+times per second, with scrollbars flashing on and off around it. This was a
+measure → overflow → scrollbar → re-measure feedback loop: the fit math
+targeted `clientWidth`/`clientHeight` (which exclude the scrollbar) but
+ignored the grid container's 2px border, so the fitted grid overshot the host
+by ~2px, toggling the scrollbars every animation frame.
+
+#### Fixed
+- **`TableGrid.tsx`** — the `fitViewport` `measure()` now subtracts the grid
+  container's 2px border from the available width/height before computing
+  column/row sizes, so the fit no longer produces an overflowing grid.
+- **`TableEditor2D.css`** — added `scrollbar-gutter: stable both-edges` to
+  `.table-grid-fit-host` so `clientWidth`/`clientHeight` stay constant when
+  scrollbars appear/disappear. This breaks the feedback loop as a defence in
+  depth, even if a tiny overshoot is ever reintroduced.
+
+#### Docs
+- Added a "VE Table Flickers / Twitches" entry to the Troubleshooting
+  reference (`docs/src/reference/troubleshooting.md`) describing the symptom,
+  cause, and fix.
+
 ### 2026-07-29 — Comment overhaul (Rust tests + frontend logic)
 
 Overhaul of code comments across the test suite and frontend logic. **No
