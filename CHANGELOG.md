@@ -13,6 +13,74 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-07-31 — AI Assistant (bring-your-own-LLM) + UX fixes
+
+Adds a bring-your-own-LLM assistant that acts as a co-pilot for tuning and ECU
+configuration. The model only ever *proposes* changes; every proposal is
+validated against the INI, clamped to authority limits, and staged in a review
+queue for explicit user approval. Nothing burns to the ECU automatically.
+
+#### Added — AI Assistant
+- **Core library** (`crates/libretune-core/src/`):
+  - `agent/` module: `orchestrator` (multi-turn read→respond loop via a
+    `ReadToolExecutor` trait), `tools` (tool catalogue), `context`,
+    `summarize` (coverage + AFR error + anomalies aggregation), `safety`
+    (authority clamping), `tiers` (constant safety tiering:
+    Safe / Caution / Dangerous).
+  - `llm/` module: `Provider` trait + native OpenAI / Anthropic / Google
+    implementations over the existing `reqwest` client (no vendor SDK crates).
+  - `TableRole` enum + `EcuDefinition::infer_table_roles()` — machine-readable
+    table roles (Ve / Ignition / AfrTarget / WarmupEnrichment / Other) derived
+    from the INI's `[VeAnalyze]` / `[WueAnalyze]` config, so the assistant knows
+    what a table *does* without guessing from its name.
+  - Extended `ActionPlayer::validate_action_set` beyond existence checks: now
+    validates `Constant.min/max` bounds, `DataType` raw storage range, table
+    cell-index bounds (`x_size`/`y_size`), and bits-type enum values.
+- **Tauri app** (`crates/libretune-app/src-tauri/src/`):
+  - `commands/agent.rs`: `agent_status`, `agent_send_message` (multi-turn loop
+    with a `LiveReadExecutor` that reads tables/constants against live state),
+    `agent_apply_proposals` (re-validates; stages, never burns).
+  - AI settings wired through the 3-layer settings pattern (all keys present in
+    `update_setting` — avoids the latent `auto_commit_on_save` bug): provider,
+    base URL, API key, model, capability tier; enablement gated on a risk
+    acknowledgement that resets on provider/key change.
+- **Frontend** (`crates/libretune-app/src/components/`):
+  - `AgentSidePanel` — docked, non-modal, resizable right-hand panel (header
+    with pop-out + collapse buttons, collapsible review queue). Pop-out to its
+    own window via the existing `WebviewWindow` hash-routing system (`agent`
+    type in `PopOutWindow.tsx`; `agent:dock` event to restore).
+  - `ChatPanel` + `ProposalQueue` — conversational transcript + per-item review
+    surface with safety-tier badges and clamp notices.
+  - `common/RiskAcknowledgement` — reusable risk-ack primitive (lifted from the
+    firmware-update pattern).
+  - Tools → AI Assistant menu entry (a toggle reflecting panel visibility).
+
+#### Changed
+- **Settings dialog Apply/OK buttons** — split the old single "Apply"
+  (which saved *and* closed) into Windows-convention **Apply** (save, stay
+  open, show per-setting status) and **OK** (save and close). Each setting now
+  saves independently so one failure no longer silently aborts the rest — this
+  was the root cause of AI provider info not persisting.
+- **Default dashboard** is now **Telemetry Live** (was Basic), with Basic as
+  the fallback if Telemetry Live is absent.
+
+#### Docs
+- New feature guide `docs/src/features/ai-assistant.md` (usage, providers,
+  safety model, troubleshooting, privacy).
+- New technical reference `docs/src/technical/ai-assistant.md` (module layout,
+  agent-loop diagram, Provider/ReadToolExecutor traits, tool catalogue).
+- Added AI Assistant section to the settings guide.
+- Added AI Assistant entries to the technical README and SUMMARY.md.
+- Added two AI FAQ entries ("Can it tune my car for me?", "Do I need
+  OpenAI?").
+- Synced all of the above to the in-app manual (`public/manual/` + `toc.json`).
+- Added section 12 to `AGENTS.md` documenting the feature for future agents.
+
+#### Verification
+- `cargo test -p libretune-core`: all tests pass (lib + integration).
+- `cargo clippy -p libretune-core --lib`: clean.
+- `npm run typecheck`: clean.
+
 ### 2026-07-29 — Fix VE table scrollbar-twitch oscillation
 
 The VE table (the only table rendered in "fit viewport" mode, where cell

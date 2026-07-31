@@ -192,8 +192,8 @@ impl ActionPlayer {
             match action {
                 Action::TableEdit {
                     table_name,
-                    x_index: _,
-                    y_index: _,
+                    x_index,
+                    y_index,
                     new_value,
                     ..
                 } => {
@@ -204,13 +204,30 @@ impl ActionPlayer {
                         errors.push(format!("Action {}: Invalid value {}", idx, new_value));
                     }
                     if let Some(d) = def {
-                        if !d.tables.contains_key(table_name)
-                            && !d.table_map_to_name.contains_key(table_name)
-                        {
-                            errors.push(format!(
-                                "Action {}: Table '{}' not found in ECU definition",
-                                idx, table_name
-                            ));
+                        match d.get_table_by_name_or_map(table_name) {
+                            Some(table) => {
+                                // Cell index bounds checking (x_index is the
+                                // column axis, y_index the row axis — matching
+                                // the BulkOperation cell convention).
+                                if *x_index as usize >= table.x_size {
+                                    errors.push(format!(
+                                        "Action {}: x_index {} out of bounds for table '{}' (width {})",
+                                        idx, x_index, table_name, table.x_size
+                                    ));
+                                }
+                                if *y_index as usize >= table.y_size {
+                                    errors.push(format!(
+                                        "Action {}: y_index {} out of bounds for table '{}' (height {})",
+                                        idx, y_index, table_name, table.y_size
+                                    ));
+                                }
+                            }
+                            None => {
+                                errors.push(format!(
+                                    "Action {}: Table '{}' not found in ECU definition",
+                                    idx, table_name
+                                ));
+                            }
                         }
                     }
                 }
@@ -226,11 +243,57 @@ impl ActionPlayer {
                         errors.push(format!("Action {}: Invalid value {}", idx, new_value));
                     }
                     if let Some(d) = def {
-                        if !d.constants.contains_key(constant_name) {
-                            errors.push(format!(
-                                "Action {}: Constant '{}' not found in ECU definition",
-                                idx, constant_name
-                            ));
+                        match d.constants.get(constant_name) {
+                            Some(c) => {
+                                // 1. INI-declared display-unit min/max.
+                                if *new_value < c.min {
+                                    errors.push(format!(
+                                        "Action {}: Value {} for constant '{}' below minimum {} ({})",
+                                        idx, new_value, constant_name, c.min, c.units
+                                    ));
+                                }
+                                if *new_value > c.max {
+                                    errors.push(format!(
+                                        "Action {}: Value {} for constant '{}' above maximum {} ({})",
+                                        idx, new_value, constant_name, c.max, c.units
+                                    ));
+                                }
+                                // 2. Underlying storage-type range (raw, pre-scale).
+                                //    Catches e.g. U08 > 255 that the display
+                                //    min/max might miss when scale != 1.
+                                if let Some((raw_min, raw_max)) = c.data_type.raw_range_bounds() {
+                                    let scale = c.scale;
+                                    let translate = c.translate;
+                                    // display = raw * scale + translate  =>  raw = (display - translate) / scale
+                                    if scale.abs() > f64::MIN_POSITIVE {
+                                        let raw = (*new_value - translate) / scale;
+                                        if raw < raw_min || raw > raw_max {
+                                            errors.push(format!(
+                                                "Action {}: Value {} ({}) for constant '{}' outside storable range [raw {:.0}..{:.0}] for {:?}",
+                                                idx, new_value, c.units, constant_name, raw_min, raw_max, c.data_type
+                                            ));
+                                        }
+                                    }
+                                }
+                                // 3. bits-type must be an enumerated option value.
+                                if !c.bit_options.is_empty() {
+                                    let allowed: Vec<f64> = (0..c.bit_options.len())
+                                        .map(|i| i as f64)
+                                        .collect();
+                                    if !allowed.contains(new_value) {
+                                        errors.push(format!(
+                                            "Action {}: Value {} for bits constant '{}' not one of {} ({:?})",
+                                            idx, new_value, constant_name, c.bit_options.len(), c.bit_options
+                                        ));
+                                    }
+                                }
+                            }
+                            None => {
+                                errors.push(format!(
+                                    "Action {}: Constant '{}' not found in ECU definition",
+                                    idx, constant_name
+                                ));
+                            }
                         }
                     }
                 }
@@ -251,13 +314,30 @@ impl ActionPlayer {
                         ));
                     }
                     if let Some(d) = def {
-                        if !d.tables.contains_key(table_name)
-                            && !d.table_map_to_name.contains_key(table_name)
-                        {
-                            errors.push(format!(
-                                "Action {}: Table '{}' not found in ECU definition",
-                                idx, table_name
-                            ));
+                        match d.get_table_by_name_or_map(table_name) {
+                            Some(table) => {
+                                // Validate each cell coordinate is in-bounds.
+                                for &(cx, cy) in cells {
+                                    if cx as usize >= table.x_size {
+                                        errors.push(format!(
+                                            "Action {}: cell x={} out of bounds for table '{}' (width {})",
+                                            idx, cx, table_name, table.x_size
+                                        ));
+                                    }
+                                    if cy as usize >= table.y_size {
+                                        errors.push(format!(
+                                            "Action {}: cell y={} out of bounds for table '{}' (height {})",
+                                            idx, cy, table_name, table.y_size
+                                        ));
+                                    }
+                                }
+                            }
+                            None => {
+                                errors.push(format!(
+                                    "Action {}: Table '{}' not found in ECU definition",
+                                    idx, table_name
+                                ));
+                            }
                         }
                     }
                     match operation.as_str() {

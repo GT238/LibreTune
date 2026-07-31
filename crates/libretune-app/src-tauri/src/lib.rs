@@ -41,6 +41,7 @@ pub(crate) use commands::util_helpers::{
 use commands::adaptive_timing::{
     disable_adaptive_timing, enable_adaptive_timing, get_adaptive_timing_stats,
 };
+use commands::agent::{agent_apply_proposals, agent_send_message, agent_status};
 use commands::annotations::{
     delete_annotation, get_all_annotations, get_annotation, get_table_annotations, set_annotation,
 };
@@ -405,6 +406,14 @@ pub fn run() {
             check_internet_connectivity,
             search_online_inis,
             download_ini,
+            // AI assistant
+            agent_status,
+            agent_send_message,
+            agent_apply_proposals,
+            // AI assistant
+            agent_status,
+            agent_send_message,
+            agent_apply_proposals,
             // Demo mode commands
             set_demo_mode,
             get_demo_mode,

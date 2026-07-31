@@ -37,6 +37,7 @@
 - [Tools](./features/tools.md)
 - [Pop-out Windows](./features/popout-windows.md)
 - [ECU Console](./features/ecu-console.md)
+- [AI Assistant](./features/ai-assistant.md)
 - [Tune Migration](./features/tune-migration.md)
 - [Hardware Configuration](./technical/port-editor.md)
 - [Action Scripting](./reference/action-scripting.md)
@@ -68,6 +69,7 @@
 - [Lua Scripting](./technical/lua-scripting.md)
 - [Plugin System](./technical/plugin-system.md)
 - [Port Editor](./technical/port-editor.md)
+- [AI Assistant](./technical/ai-assistant.md)
 
 # FAQ
 

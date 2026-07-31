@@ -32,6 +32,7 @@ All notable changes to LibreTune will be documented in this file.
 - **Change Annotations** — Annotate individual tune changes with notes explaining the purpose of each modification.
 - **WASM Plugin System** — Secure, sandboxed plugin architecture using WebAssembly. Plugins declare permissions and run without external dependencies.
 - **Dashboard Validation** — Automated validation of dashboard configurations against INI channel definitions.
+- **AI Assistant** — Bring-your-own-LLM co-pilot that helps tune and configure your ECU. Supports OpenAI, Anthropic, and Google providers (plus any OpenAI-compatible local endpoint like Ollama). The assistant only ever *proposes* changes — every proposal is validated against the INI, clamped to authority limits, and staged in a review queue for explicit user approval. Nothing burns automatically. Lives in a docked side panel (resizable, pop-out-able). Gated behind an "at your own risk" enablement.
 - Git-based tune versioning with commit history, branches, and auto-commit settings
 - Comprehensive documentation system (API docs + user manual)
 - TuneHistoryPanel for viewing and managing tune history
@@ -49,6 +50,7 @@ All notable changes to LibreTune will be documented in this file.
 - CSV export/import for tune data
 - Reset tune to defaults
 - Runtime Packet Mode setting (Auto / Force Burst / Force OCH / Disabled)
+- Backend logging now controlled via `RUST_LOG` using `tracing` (`info` default); ECU protocol debug output can be re-enabled with `RUST_LOG=libretune_core::protocol=debug`
 
 ### Changed
 - Replaced template-based "New Project" flow with file-centric "Open Tune File" workflow

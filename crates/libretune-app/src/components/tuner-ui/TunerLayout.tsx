@@ -4,6 +4,7 @@ import { Toolbar } from './Toolbar';
 import { TabBar, Tab } from './TabBar';
 import { Sidebar } from './Sidebar';
 import { StatusBar, ChannelInfoForStatusBar } from './StatusBar';
+import { AgentSidePanel } from '../agent/AgentSidePanel';
 import './TunerLayout.css';
 
 export interface TunerLayoutProps {
@@ -45,6 +46,11 @@ export interface TunerLayoutProps {
 
   // Unit system
   unitsSystem?: 'metric' | 'imperial';
+
+  // AI assistant side panel (right-hand, non-modal)
+  agentPanelVisible?: boolean;
+  onAgentPanelCollapse?: () => void;
+  onAgentPanelPopOut?: () => void;
 
   // Realtime channel data for status bar (subscriptions handled by StatusBar itself)
   realtimeChannels?: string[];
@@ -123,14 +129,22 @@ export function TunerLayout({
   onConnectionClick,
   projectName,
   unitsSystem,
+  agentPanelVisible,
+  onAgentPanelCollapse,
+  onAgentPanelPopOut,
   realtimeChannels,
   channelInfoMap,
   children,
 }: TunerLayoutProps) {
   const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [agentPanelWidth, setAgentPanelWidth] = useState(360);
 
   const handleSidebarResize = useCallback((newWidth: number) => {
     setSidebarWidth(Math.max(150, Math.min(400, newWidth)));
+  }, []);
+
+  const handleAgentPanelResize = useCallback((newWidth: number) => {
+    setAgentPanelWidth(Math.max(280, Math.min(640, newWidth)));
   }, []);
 
   return (
@@ -172,6 +186,18 @@ export function TunerLayout({
             {children}
           </div>
         </div>
+        
+        {/* AI Assistant side panel (right-hand, non-modal). Must be a flex
+            child of .tuner-layout-main (horizontal flex) so it sits beside the
+            documents rather than stacking vertically below them. */}
+        {agentPanelVisible && (
+          <AgentSidePanel
+            width={agentPanelWidth}
+            onResize={handleAgentPanelResize}
+            onCollapse={() => onAgentPanelCollapse?.()}
+            onPopOut={() => onAgentPanelPopOut?.()}
+          />
+        )}
       </div>
       
       {/* Status Bar */}

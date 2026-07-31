@@ -256,7 +256,14 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
       
       // If no initial path, select first available
       if (!selectedPath && dashes.length > 0) {
-        // Prefer Basic.ltdash.xml as the default
+        // Prefer Telemetry Live.ltdash.xml as the default dashboard
+        const telemetryDash = dashes.find(d => d.name === 'Telemetry Live.ltdash.xml');
+        if (telemetryDash) {
+          setSelectedPath(telemetryDash.path);
+          return;
+        }
+
+        // Fall back to Basic.ltdash.xml if Telemetry Live isn't present
         const basicDash = dashes.find(d => d.name === 'Basic.ltdash.xml');
         if (basicDash) {
           setSelectedPath(basicDash.path);

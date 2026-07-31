@@ -239,6 +239,25 @@ impl DataType {
         }
     }
 
+    /// Returns the storage min/max of this type in raw (unscaled) integer units.
+    ///
+    /// Used to validate proposed values fit within the underlying storage type
+    /// before scaling/translation is applied. Returns `None` for non-numeric
+    /// types (`String`).
+    pub fn raw_range_bounds(&self) -> Option<(f64, f64)> {
+        match self {
+            DataType::U08 | DataType::Bits => Some((0.0, 255.0)),
+            DataType::S08 => Some((-128.0, 127.0)),
+            DataType::U16 => Some((0.0, 65535.0)),
+            DataType::S16 => Some((-32768.0, 32767.0)),
+            DataType::U32 => Some((0.0, 4294967295.0)),
+            DataType::S32 => Some((-2147483648.0, 2147483647.0)),
+            // F32/F64 are unbounded at this layer — rely on Constant.min/max instead.
+            DataType::F32 | DataType::F64 => None,
+            DataType::String => None,
+        }
+    }
+
     /// Write a value to bytes at given offset
     pub fn write_to_bytes(&self, data: &mut [u8], offset: usize, value: f64, endian: Endianness) {
         use byteorder::{BigEndian, ByteOrder, LittleEndian};

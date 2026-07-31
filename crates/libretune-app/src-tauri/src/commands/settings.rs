@@ -96,6 +96,44 @@ pub async fn update_setting(
             settings.last_active_tab = if value.is_empty() { None } else { Some(value) }
         }
         "language" => settings.language = if value.is_empty() { None } else { Some(value) },
+
+        // --- AI Assistant settings (all keys must have arms; see repo memory
+        // about the latent auto_commit_on_save bug). ---
+        "ai_assistant_enabled" => {
+            // Refuse to enable without a risk acknowledgement.
+            let want: bool = value.parse().map_err(|_| "Invalid boolean value")?;
+            if want && !settings.ai_risk_acknowledged {
+                return Err(
+                    "Cannot enable AI assistant without acknowledging the risk warning"
+                        .to_string(),
+                );
+            }
+            settings.ai_assistant_enabled = want;
+        }
+        "ai_risk_acknowledged" => {
+            settings.ai_risk_acknowledged =
+                value.parse().map_err(|_| "Invalid boolean value")?
+        }
+        "ai_provider" => {
+            // Changing the provider invalidates the prior risk ack boundary,
+            // so force the user to re-acknowledge.
+            if value != settings.ai_provider {
+                settings.ai_risk_acknowledged = false;
+                settings.ai_assistant_enabled = false;
+            }
+            settings.ai_provider = value;
+        }
+        "ai_base_url" => settings.ai_base_url = value,
+        "ai_api_key" => {
+            // Changing the key invalidates the prior risk ack boundary.
+            if value != settings.ai_api_key {
+                settings.ai_risk_acknowledged = false;
+                settings.ai_assistant_enabled = false;
+            }
+            settings.ai_api_key = value;
+        }
+        "ai_model" => settings.ai_model = value,
+        "ai_capability_tier" => settings.ai_capability_tier = value,
         _ => return Err(format!("Unknown setting: {}", key)),
     }
 

@@ -8,7 +8,7 @@ import { createFocusTrap, focusFirstElement } from '../../../utils/focusManageme
 import HotkeyEditor from '../../dialogs/HotkeyEditor';
 import ThemePicker from '../../dialogs/ThemePicker';
 import StatusBarChannelSelector from '../../dialogs/StatusBarChannelSelector';
-import { Dialog, Button, FormField } from '../../common';
+import { Dialog, Button, FormField, RiskAcknowledgement } from '../../common';
 import { ThemeName } from '../../../themes';
 import { SUPPORTED_LANGUAGES, LANGUAGE_STORAGE_KEY, type SupportedLanguageCode } from '../../../i18n/languages';
 import ConnectionMetrics from '../../layout/ConnectionMetrics';
@@ -50,6 +50,9 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   });
   const [localUnits, setLocalUnits] = useState('metric');
   const [autoBurnOnClose, setAutoBurnOnClose] = useState(false);
+  // Save feedback: 'idle' (nothing shown), 'saving', 'saved', 'error'.
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [tableYAxisBottom, setTableYAxisBottom] = useState(false);
   const [tableCursorColor, setTableCursorColor] = useState('');
@@ -81,6 +84,15 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [autoCommitOnSave, setAutoCommitOnSave] = useState('never');
   const [commitMessageFormat, setCommitMessageFormat] = useState('Tune saved on {date} at {time}');
   const [runtimePacketMode, setRuntimePacketMode] = useState<'Auto'|'ForceBurst'|'ForceOCH'|'Disabled'>('Auto');
+
+  // AI assistant settings (bring-your-own LLM). All gated on the risk ack.
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiRiskAcked, setAiRiskAcked] = useState(false);
+  const [aiProvider, setAiProvider] = useState('openai');
+  const [aiBaseUrl, setAiBaseUrl] = useState('');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('');
+  const [aiCapabilityTier, setAiCapabilityTier] = useState<'read' | 'tune' | 'config'>('read');
   // Auto-reconnect setting: whether to automatically sync & reconnect after controller commands
   const [autoReconnectAfterControllerCommand, setAutoReconnectAfterControllerCommand] = useState<boolean>(true);
   const [autoReconnectAfterFirmware, setAutoReconnectAfterFirmware] = useState<boolean>(true);
@@ -120,6 +132,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     setLocalTheme(theme);
     // Load settings from backend
     if (isOpen) {
+      setSaveStatus('idle');
+      setSaveError(null);
       invoke('get_settings').then((settings: any) => {
         if (settings.units_system !== undefined) setLocalUnits(settings.units_system);
         if (settings.language) {
@@ -152,6 +166,14 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         if (settings.auto_commit_on_save !== undefined) setAutoCommitOnSave(settings.auto_commit_on_save);
         if (settings.commit_message_format !== undefined) setCommitMessageFormat(settings.commit_message_format);
         if (settings.runtime_packet_mode !== undefined) setRuntimePacketMode(settings.runtime_packet_mode);
+        // AI assistant settings
+        if (settings.ai_assistant_enabled !== undefined) setAiEnabled(settings.ai_assistant_enabled);
+        if (settings.ai_risk_acknowledged !== undefined) setAiRiskAcked(settings.ai_risk_acknowledged);
+        if (settings.ai_provider !== undefined) setAiProvider(settings.ai_provider);
+        if (settings.ai_base_url !== undefined) setAiBaseUrl(settings.ai_base_url);
+        if (settings.ai_api_key !== undefined) setAiApiKey(settings.ai_api_key);
+        if (settings.ai_model !== undefined) setAiModel(settings.ai_model);
+        if (settings.ai_capability_tier !== undefined) setAiCapabilityTier(settings.ai_capability_tier);
         if (settings.auto_reconnect_after_controller_command !== undefined) setAutoReconnectAfterControllerCommand(!!settings.auto_reconnect_after_controller_command);
         if (settings.auto_reconnect_after_firmware !== undefined) setAutoReconnectAfterFirmware(!!settings.auto_reconnect_after_firmware);
         // Auto-record settings
@@ -278,7 +300,25 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     }
   }, [currentProject]);
 
-  const handleApply = useCallback(async () => {
+  // Persist all settings to the backend WITHOUT closing the dialog. Each
+  // setting is saved independently so one failure cannot silently abort the
+  // rest (this was the root cause of the GLM/z.ai info not saving — a thrown
+  // invoke aborted the whole sequence). Returns the list of per-setting
+  // errors (empty on full success).
+  const saveSettings = useCallback(async (): Promise<string[]> => {
+    setSaveStatus('saving');
+    setSaveError(null);
+    const errors: string[] = [];
+    // Helper: invoke update_setting, capturing any error instead of letting
+    // it abort the whole save.
+    const set = async (key: string, value: string) => {
+      try {
+        await invoke('update_setting', { key, value });
+      } catch (e) {
+        errors.push(`${key}: ${String(e)}`);
+      }
+    };
+
     onThemeChange(localTheme);
     // Apply language change immediately and persist it. Dynamically import the
     // i18n instance so loading this dialog module doesn't drag in i18next on
@@ -294,66 +334,96 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     try {
       localStorage.setItem(LANGUAGE_STORAGE_KEY, localLanguage);
     } catch { /* ignore */ }
-    await invoke('update_setting', { key: 'language', value: localLanguage });
+    await set('language', localLanguage);
     // Update units setting
     if (localUnits !== 'metric' && localUnits !== 'imperial') {
       setLocalUnits('metric');
-      await invoke('update_setting', { key: 'units_system', value: 'metric' });
+      await set('units_system', 'metric');
     } else {
-      await invoke('update_setting', { key: 'units_system', value: localUnits });
+      await set('units_system', localUnits);
     }
     // Update auto-burn setting
-    await invoke('update_setting', { key: 'auto_burn_on_close', value: autoBurnOnClose.toString() });
+    await set('auto_burn_on_close', autoBurnOnClose.toString());
     // Update status bar channels
-    await invoke('update_setting', { key: 'status_bar_channels', value: JSON.stringify(statusBarChannels) });
+    await set('status_bar_channels', JSON.stringify(statusBarChannels));
     // Update indicator panel settings
-    await invoke('update_setting', { key: 'indicator_column_count', value: indicatorColumnCount });
-    await invoke('update_setting', { key: 'indicator_fill_empty', value: indicatorFillEmpty.toString() });
-    await invoke('update_setting', { key: 'indicator_text_fit', value: indicatorTextFit });
+    await set('indicator_column_count', indicatorColumnCount);
+    await set('indicator_fill_empty', indicatorFillEmpty.toString());
+    await set('indicator_text_fit', indicatorTextFit);
     // Update heatmap settings
-    await invoke('update_setting', { key: 'heatmap_value_scheme', value: heatmapValueScheme });
-    await invoke('update_setting', { key: 'heatmap_change_scheme', value: heatmapChangeScheme });
-    await invoke('update_setting', { key: 'heatmap_coverage_scheme', value: heatmapCoverageScheme });
+    await set('heatmap_value_scheme', heatmapValueScheme);
+    await set('heatmap_change_scheme', heatmapChangeScheme);
+    await set('heatmap_coverage_scheme', heatmapCoverageScheme);
     // Update gauge settings
-    await invoke('update_setting', { key: 'gauge_snap_to_grid', value: gaugeSnapToGrid.toString() });
-    await invoke('update_setting', { key: 'gauge_free_move', value: gaugeFreeMove.toString() });
-    await invoke('update_setting', { key: 'gauge_lock', value: gaugeLock.toString() });
-    await invoke('update_setting', { key: 'auto_sync_gauge_ranges', value: autoSyncGaugeRanges.toString() });
+    await set('gauge_snap_to_grid', gaugeSnapToGrid.toString());
+    await set('gauge_free_move', gaugeFreeMove.toString());
+    await set('gauge_lock', gaugeLock.toString());
+    await set('auto_sync_gauge_ranges', autoSyncGaugeRanges.toString());
     // Update version control settings
-    await invoke('update_setting', { key: 'auto_commit_on_save', value: autoCommitOnSave });
-    await invoke('update_setting', { key: 'commit_message_format', value: commitMessageFormat });
+    await set('auto_commit_on_save', autoCommitOnSave);
+    await set('commit_message_format', commitMessageFormat);
     // Update runtime packet mode
-    await invoke('update_setting', { key: 'runtime_packet_mode', value: runtimePacketMode });
-    await invoke('update_setting', { key: 'auto_reconnect_after_controller_command', value: autoReconnectAfterControllerCommand.toString() });
-    await invoke('update_setting', { key: 'auto_reconnect_after_firmware', value: autoReconnectAfterFirmware.toString() });
+    await set('runtime_packet_mode', runtimePacketMode);
+    // Update AI assistant settings. Order matters: provider/key first, then
+    // capability tier, then ack, then enable — so the backend's enable-guard
+    // (which requires risk-ack) sees the ack we just sent. Provider/key
+    // changes reset the ack on the backend side; we re-send it afterwards.
+    await set('ai_provider', aiProvider);
+    await set('ai_base_url', aiBaseUrl);
+    await set('ai_api_key', aiApiKey);
+    await set('ai_model', aiModel);
+    await set('ai_capability_tier', aiCapabilityTier);
+    await set('ai_risk_acknowledged', aiRiskAcked.toString());
+    await set('ai_assistant_enabled', aiEnabled.toString());
+    await set('auto_reconnect_after_controller_command', autoReconnectAfterControllerCommand.toString());
+    await set('auto_reconnect_after_firmware', autoReconnectAfterFirmware.toString());
     // Update auto-record settings
-    await invoke('update_setting', { key: 'auto_record_enabled', value: autoRecordEnabled.toString() });
-    await invoke('update_setting', { key: 'key_on_threshold_rpm', value: keyOnThresholdRpm.toString() });
-    await invoke('update_setting', { key: 'key_off_timeout_sec', value: keyOffTimeoutSec.toString() });
+    await set('auto_record_enabled', autoRecordEnabled.toString());
+    await set('key_on_threshold_rpm', keyOnThresholdRpm.toString());
+    await set('key_off_timeout_sec', keyOffTimeoutSec.toString());
     // Update alert rules settings
-    await invoke('update_setting', { key: 'alert_large_change_enabled', value: alertLargeChangeEnabled.toString() });
-    await invoke('update_setting', { key: 'alert_large_change_abs', value: alertLargeChangeAbs.toString() });
-    await invoke('update_setting', { key: 'alert_large_change_percent', value: alertLargeChangePercent.toString() });
-    
+    await set('alert_large_change_enabled', alertLargeChangeEnabled.toString());
+    await set('alert_large_change_abs', alertLargeChangeAbs.toString());
+    await set('alert_large_change_percent', alertLargeChangePercent.toString());
+
     // Update hotkey bindings
     try {
       await invoke('save_hotkey_bindings', { bindings: hotkeyBindings });
     } catch (e) {
-      console.error('Failed to save hotkey bindings:', e);
+      errors.push(`hotkey_bindings: ${String(e)}`);
     }
-    
+
     // Update project-specific settings
     if (currentProject) {
       try {
         await invoke('update_project_auto_connect', { autoConnect });
       } catch (e) {
-        console.error('Failed to update auto-connect setting:', e);
+        errors.push(`project_auto_connect: ${String(e)}`);
       }
     }
-    
+
     onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode, autoSyncGaugeRanges });
+
+    if (errors.length > 0) {
+      setSaveStatus('error');
+      setSaveError(errors.join('\n'));
+    } else {
+      setSaveStatus('saved');
+    }
+    return errors;
+  }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, aiProvider, aiBaseUrl, aiApiKey, aiModel, aiCapabilityTier, aiRiskAcked, aiEnabled, autoReconnectAfterControllerCommand, autoReconnectAfterFirmware, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange]);
+
+  // Windows-convention buttons:
+  //  - Apply: save WITHOUT closing (so the user can verify it worked).
+  //  - OK:     save AND close.
+  const handleApply = useCallback(async () => {
+    await saveSettings();
+  }, [saveSettings]);
+
+  const handleOk = useCallback(async () => {
+    await saveSettings();
     onClose();
-  }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoReconnectAfterFirmware, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
+  }, [saveSettings, onClose]);
 
   return (
     <Dialog
@@ -751,6 +821,111 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             )}
           </FormField>
 
+          <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>AI Assistant (at your own risk)</h3>
+          <span className="dialog-form-note">
+            Bring your own LLM provider. The assistant only ever <strong>proposes</strong> changes for
+            your explicit approval — nothing is burned to the ECU automatically.
+          </span>
+
+          <FormField label="Enable AI Assistant" help="Requires acknowledging the risk warning below">
+            {(id) => (
+              <label className="dialog-checkbox-option" style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={aiEnabled}
+                  onChange={(e) => setAiEnabled(e.target.checked)}
+                  disabled={!aiRiskAcked}
+                />
+                <span>{aiEnabled ? 'Enabled' : 'Disabled'}{!aiRiskAcked ? ' (acknowledge risk first)' : ''}</span>
+              </label>
+            )}
+          </FormField>
+
+          <RiskAcknowledgement
+            acknowledged={aiRiskAcked}
+            onAcknowledgedChange={setAiRiskAcked}
+            risk="high"
+            label="At your own risk"
+            warning={
+              <>
+                The assistant sends tune/configuration data to the configured LLM provider and may
+                propose changes that alter engine behavior. Proposals are validated and clamped, but
+                a storable value can still be <em>wrong</em> (e.g. pin assignments). You must review
+                every proposal before it is staged, and burning to the ECU is always a separate manual
+                step. You assume all risk.
+              </>
+            }
+            acknowledgementText="I understand the assistant only proposes changes, that I must approve them, and that I am responsible for verifying every change before it is applied or burned."
+          />
+
+          <FormField label="Provider" help="OpenAI = most hosted/local-compatible endpoints; Anthropic & Google are native protocols">
+            {(id) => (
+              <select
+                id={id}
+                value={aiProvider}
+                onChange={(e) => setAiProvider(e.target.value)}
+              >
+                <option value="openai">OpenAI (and compatible: OpenRouter, Ollama, LM Studio)</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="google">Google (Gemini)</option>
+              </select>
+            )}
+          </FormField>
+
+          <FormField label="Base URL" help="Leave empty for the provider default. For local models use e.g. http://localhost:11434/v1 (Ollama)">
+            {(id) => (
+              <input
+                id={id}
+                type="text"
+                value={aiBaseUrl}
+                onChange={(e) => setAiBaseUrl(e.target.value)}
+                placeholder="(provider default)"
+                style={{ fontFamily: 'monospace' }}
+              />
+            )}
+          </FormField>
+
+          <FormField label="API Key" help="Stored locally in settings. Optional for local/no-auth providers">
+            {(id) => (
+              <input
+                id={id}
+                type="password"
+                value={aiApiKey}
+                onChange={(e) => setAiApiKey(e.target.value)}
+                placeholder="sk-..."
+                style={{ fontFamily: 'monospace' }}
+                autoComplete="off"
+              />
+            )}
+          </FormField>
+
+          <FormField label="Model" help="e.g. gpt-4o, claude-3-5-sonnet-20241022, gemini-1.5-pro">
+            {(id) => (
+              <input
+                id={id}
+                type="text"
+                value={aiModel}
+                onChange={(e) => setAiModel(e.target.value)}
+                style={{ fontFamily: 'monospace' }}
+              />
+            )}
+          </FormField>
+
+          <FormField label="Capability Tier" help="The scope the assistant is unlocked for">
+            {(id) => (
+              <select
+                id={id}
+                value={aiCapabilityTier}
+                onChange={(e) => setAiCapabilityTier(e.target.value as 'read' | 'tune' | 'config')}
+              >
+                <option value="read">Read / diagnose only</option>
+                <option value="config">Propose ECU configuration changes</option>
+                <option value="tune">Propose tune edits</option>
+              </select>
+            )}
+          </FormField>
+
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Indicator Panel</h3>
           
           <FormField label="Column Count">
@@ -1111,8 +1286,27 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         </div>
 
       <Dialog.Footer>
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" onClick={handleApply}>Apply</Button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }}>
+          {saveStatus === 'saving' && (
+            <span style={{ fontSize: '12px', opacity: 0.7 }}>Saving…</span>
+          )}
+          {saveStatus === 'saved' && (
+            <span style={{ fontSize: '12px', color: '#80d090' }}>Settings saved.</span>
+          )}
+          {saveStatus === 'error' && (
+            <span
+              title={saveError ?? ''}
+              style={{ fontSize: '12px', color: '#f0a0a0', cursor: 'help', maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              Some settings failed to save (hover for details)
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="secondary" onClick={handleApply} disabled={saveStatus === 'saving'}>Apply</Button>
+          <Button variant="primary" onClick={handleOk} disabled={saveStatus === 'saving'}>OK</Button>
+        </div>
       </Dialog.Footer>
     </Dialog>
   );

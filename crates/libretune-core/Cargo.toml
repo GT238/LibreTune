@@ -10,6 +10,8 @@ description = "Core library for LibreTune ECU tuning software"
 # Async runtime
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+# Async trait support for the LLM Provider trait
+async-trait = { workspace = true }
 
 # Serial communication
 serialport = { workspace = true }
