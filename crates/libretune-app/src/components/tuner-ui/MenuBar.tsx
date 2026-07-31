@@ -82,22 +82,37 @@ export function MenuBar({ items }: MenuBarProps) {
     }
   };
 
+  // Indexes of top-level items that can receive focus (skip separators).
+  // Separators are non-interactive dividers; ArrowRight/ArrowLeft must hop
+  // over them rather than landing on a non-focusable element.
+  const focusableIndexes = items
+    .map((item, i) => ({ item, i }))
+    .filter(({ item }) => !item.separator)
+    .map(({ i }) => i);
+
   const handleMenuKeyDown = (e: KeyboardEvent, index: number) => {
     switch (e.key) {
       case 'ArrowRight':
         e.preventDefault();
-        const nextIndex = (index + 1) % items.length;
-        setFocusedIndex(nextIndex);
-        if (openMenuId) {
-          setOpenMenuId(items[nextIndex].id);
+        {
+          const pos = focusableIndexes.indexOf(index);
+          const nextIndex = focusableIndexes[(pos + 1) % focusableIndexes.length];
+          setFocusedIndex(nextIndex);
+          if (openMenuId) {
+            setOpenMenuId(items[nextIndex].id);
+          }
         }
         break;
       case 'ArrowLeft':
         e.preventDefault();
-        const prevIndex = (index - 1 + items.length) % items.length;
-        setFocusedIndex(prevIndex);
-        if (openMenuId) {
-          setOpenMenuId(items[prevIndex].id);
+        {
+          const pos = focusableIndexes.indexOf(index);
+          const prevIndex =
+            focusableIndexes[(pos - 1 + focusableIndexes.length) % focusableIndexes.length];
+          setFocusedIndex(prevIndex);
+          if (openMenuId) {
+            setOpenMenuId(items[prevIndex].id);
+          }
         }
         break;
       case 'ArrowDown':
@@ -117,6 +132,17 @@ export function MenuBar({ items }: MenuBarProps) {
   return (
     <div className="menubar" ref={menuBarRef} role="menubar">
       {items.map((item, index) => {
+        // Top-level separators render as a non-focusable vertical rule.
+        if (item.separator) {
+          return (
+            <div
+              key={item.id || `sep-${index}`}
+              className="menubar-separator"
+              role="separator"
+              aria-orientation="vertical"
+            />
+          );
+        }
         const parsed = parseLabel(item.label);
         const isOpen = openMenuId === item.id;
         

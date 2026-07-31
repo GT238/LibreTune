@@ -8,6 +8,71 @@ Configure LibreTune behavior, connection settings, and display preferences.
 
 The Settings dialog includes multiple tabs for different options.
 
+### Finding a Setting (Search)
+
+A **search box** in the top-right of the dialog title bar filters settings
+**across all tabs** as you type — the same "narrow as you type" behavior as the
+sidebar search. When you search:
+
+- The tab bar hides and matching sections from *any* tab appear in a single list.
+- Every label, dropdown option, and help note is searchable — no need to know
+  which tab a setting lives on.
+- A **"No settings found"** message appears if nothing matches.
+
+Clear the box (or click the ✕) to return to the normal tabbed view.
+
+---
+
+## Language
+
+The **General** tab's **Language** selector localizes the LibreTune interface.
+Supported languages:
+
+- **English** (default / fallback)
+- **Português (Brasil)**
+- **Magyar** (Hungarian)
+
+Switching the language immediately translates the **application menus**
+(File, Edit, View, Tools, Help) and the **toolbar tooltips**. The ECU tuning
+menus (Fuel, Ignition, etc.) are **not** translated — those labels come from
+your ECU's INI definition file and are shown verbatim, since they are ECU
+content rather than application chrome.
+
+> **Adding a language:** copy `crates/libretune-app/src/i18n/locales/en/` to a
+> new `<code>/` folder, translate every value (keys must stay identical), and
+> register it in `i18n/index.ts` plus the picker in the Settings dialog.
+
+---
+
+## Menu Bar Layout
+
+### Menu grouping
+
+The top menu bar is organized into three groups separated by visual dividers:
+
+```
+File  Edit  View  Tools   │   <ECU tuning menus>   │   Help
+└─── application menus ──┘   └── from the INI ──┘   └── rightmost
+```
+
+- **Application menus** (File, Edit, View, Tools) are translated and keep
+  stable positions regardless of which ECU you connect.
+- **ECU tuning menus** (Fuel, Ignition, etc.) come from the INI and vary per
+  ECU. They are grouped between the app menus and Help.
+- **Help** stays at the far right, where users expect to find it.
+
+Each menu also has an **access key** (the underlined letter): press `Alt` plus
+that letter to open the menu (e.g. `Alt+F` for File, `Alt+T` for Tools).
+
+### Show ECU menus in menu bar
+
+**Appearance → Layout → "Show ECU menus in menu bar"** (default: on)
+
+If you prefer a leaner menu bar, uncheck this to **hide the ECU tuning menus
+from the top bar**. They remain fully available in the **sidebar** (the
+permanent, collapsible navigation panel on the left). Toggle the sidebar via
+**View → Toggle Sidebar**.
+
 ---
 
 ## Connection Settings

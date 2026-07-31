@@ -48,5 +48,19 @@
     "size": "Méret",
     "modified": "Módosítva",
     "search": "Keresés"
+  },
+  "toolbar": {
+    "openTune": "Tune megnyitás",
+    "saveTune": "Tune mentés",
+    "burnDisconnected": "Kapcsolódj az ECU-hoz a mentéshez",
+    "burnPending": "Függő módosítások írása az ECU-ba",
+    "burnNone": "Nincs írandó módosítás az ECU-ba",
+    "disconnect": "Leválaszt",
+    "connect": "Kapcsolódás az ECU-hoz",
+    "connectionInfo": "Kapcsolat állapota és csomagmód",
+    "realtime": "Valós idejü müszerfal",
+    "stopLogging": "Loggolás leállítása",
+    "startLogging": "Loggolás indítása",
+    "settings": "Beállítások"
   }
 }

@@ -73,6 +73,8 @@ export interface DialogOverlaysProps {
   setSettingsDialogOpen: (v: boolean) => void;
   setUnitsSystem: (v: 'metric' | 'imperial') => void;
   setAutoBurnOnClose: (v: boolean) => void;
+  showEcuMenusInMenubar: boolean;
+  setShowEcuMenusInMenubar: (v: boolean) => void;
   setStatus: React.Dispatch<React.SetStateAction<ConnectionStatus>>;
   setStatusBarChannels: (v: string[]) => void;
   setDefaultRuntimePacketMode: (v: any) => void;
@@ -198,6 +200,7 @@ export function DialogOverlays(props: DialogOverlaysProps) {
     newTuneDialogOpen, setNewTuneDialogOpen,
     settingsDialogOpen, setSettingsDialogOpen,
     setUnitsSystem, setAutoBurnOnClose, setStatus, setStatusBarChannels, setDefaultRuntimePacketMode,
+    showEcuMenusInMenubar, setShowEcuMenusInMenubar,
     mathChannelsDialogOpen, setMathChannelsDialogOpen,
     aboutDialogOpen, setAboutDialogOpen,
     connectionDialogOpen, setConnectionDialogOpen,
@@ -258,6 +261,8 @@ export function DialogOverlays(props: DialogOverlaysProps) {
         theme={theme}
         onThemeChange={(t) => setTheme(t as ThemeName)}
         currentProject={currentProject}
+        showEcuMenusInMenubar={showEcuMenusInMenubar}
+        onEcuMenusInMenubarChange={setShowEcuMenusInMenubar}
         onSettingsChange={(settings) => {
           if (settings.units) setUnitsSystem(settings.units as 'metric' | 'imperial');
           if (settings.autoBurnOnClose !== undefined) setAutoBurnOnClose(settings.autoBurnOnClose);

@@ -83,6 +83,10 @@ pub async fn update_setting(
         "table_y_axis_bottom" => {
             settings.table_y_axis_bottom = value.parse().map_err(|_| "Invalid boolean value")?
         }
+        "show_ecu_menus_in_menubar" => {
+            settings.show_ecu_menus_in_menubar =
+                value.parse().map_err(|_| "Invalid boolean value")?
+        }
         "table_cursor_color" => settings.table_cursor_color = value,
         "table_trail_color" => settings.table_trail_color = value,
         "table_trail_fade_sec" => {

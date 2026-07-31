@@ -40,12 +40,21 @@ If you don't see your ECU's port:
 
 ### Runtime Packet Mode (Auto behavior)
 
-If your **Runtime Packet Mode** setting is set to **Auto**, LibreTune will choose the best fetch mode for the current INI on connect:
+If your **Runtime Packet Mode** setting is set to **Auto**, LibreTune chooses the
+best fetch mode based on the detected ECU type and the loaded INI:
 
-- If the loaded INI defines an OCH block read (`ochGetCommand` / `ochBlockSize`), LibreTune will prefer **Force OCH** for read efficiency.
-- Otherwise, the app will fall back to **Force Burst** for compatibility.
+- **Speeduino / MegaSquirt (MS2 / MS3)** — Auto always selects **Force Burst**
+  (the `A` command). Burst is the high-throughput, well-tested realtime path for
+  these ECUs. Switching to OCH automatically caused throughput to collapse and
+  gauges to stall on some firmware, so Auto no longer does so.
+- **rusEFI / FOME / epicEFI** — Auto may select **Force OCH** when the loaded INI
+  defines an OCH block read (`ochGetCommand` / `ochBlockSize`), or when the link
+  is slow (Bluetooth / low baud) or measured response times are high.
 
-You can override the automatic choice in the Settings dialog by selecting a specific runtime packet mode (Auto / Force Burst / Force OCH / Disabled).
+You can override the automatic choice at any time in the Settings dialog by
+selecting a specific runtime packet mode (**Auto / Force Burst / Force OCH /
+Disabled**). If your gauges stall or report invalid values in Auto mode, try
+**Force Burst** first.
 
 
 ### Auto-sync & Reconnect After Controller Commands
