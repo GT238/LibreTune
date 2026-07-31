@@ -306,6 +306,14 @@ function AppContent() {
   // Tauri check
   const [isTauri, setIsTauri] = useState(true);
 
+  // Persist UI layout state to settings so it's restored on next launch.
+  useEffect(() => {
+    void invoke('update_setting', { key: 'sidebar_visible', value: String(sidebarVisible) }).catch(() => {});
+  }, [sidebarVisible]);
+  useEffect(() => {
+    void invoke('update_setting', { key: 'agent_panel_visible', value: String(agentPanelVisible) }).catch(() => {});
+  }, [agentPanelVisible]);
+
   // Check if running in Tauri
   useEffect(() => {
     const inTauri = !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
@@ -362,6 +370,9 @@ function AppContent() {
         if (settings.auto_burn_on_close !== undefined) setAutoBurnOnClose(settings.auto_burn_on_close);
         if (settings.status_bar_channels) setStatusBarChannels(settings.status_bar_channels);
         if (settings.last_serial_port) setLastSerialPort(settings.last_serial_port);
+        // Restore UI layout state.
+        if (settings.sidebar_visible !== undefined) setSidebarVisible(!!settings.sidebar_visible);
+        if (settings.agent_panel_visible !== undefined) setAgentPanelVisible(!!settings.agent_panel_visible);
         // Honor saved UI language preference (mirror to localStorage so the
         // i18n LanguageDetector picks it up on next app start, and switch live now).
         if (settings.language && typeof settings.language === 'string') {
@@ -1342,6 +1353,24 @@ function AppContent() {
   const handleTabReorder = useCallback((newTabs: Tab[]) => {
     setTabs(newTabs);
   }, []);
+
+  // Persist the active tab + open-tab list so they can be restored on launch.
+  // Debounced so rapid tab switches don't hammer the settings file.
+  const saveTabsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (saveTabsTimer.current) clearTimeout(saveTabsTimer.current);
+    saveTabsTimer.current = setTimeout(() => {
+      void invoke('update_setting', { key: 'last_active_tab', value: activeTabId ?? '' }).catch(() => {});
+      // Serialize the tab list (id+title+icon+type) for restore. Only
+      // include closable content tabs (skip the dashboard, which is always
+      // re-created).
+      const serializable = tabs
+        .filter((t) => t.id !== 'dashboard' && t.closable !== false)
+        .map((t) => ({ id: t.id, title: t.title, icon: t.icon, type: tabContents[t.id]?.type }));
+      void invoke('update_setting', { key: 'open_tabs', value: JSON.stringify(serializable) }).catch(() => {});
+    }, 500);
+    return () => { if (saveTabsTimer.current) clearTimeout(saveTabsTimer.current); };
+  }, [tabs, activeTabId, tabContents]);
 
   // Pop-out windows: handleTabPopout + tab:dock + table:updated listeners.
   const { handleTabPopout } = useTabPopout({

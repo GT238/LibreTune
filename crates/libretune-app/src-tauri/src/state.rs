@@ -180,6 +180,9 @@ pub struct AppState {
     pub rpm_state_tracker: Mutex<RpmStateTracker>,
     pub math_channels: Mutex<Vec<UserMathChannel>>,
     pub stream_stats: Mutex<StreamStats>,
+    /// JoinHandle for the currently-running AI assistant turn (if any).
+    /// Aborted by `agent_stop` to cancel an in-flight LLM request.
+    pub agent_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 #[derive(Clone, Debug)]

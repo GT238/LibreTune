@@ -24,16 +24,25 @@ export interface ChatPanelProps {
   onProposals: (proposed: ProposedAction[]) => void;
   /** System prompt describing current ECU/tune context. */
   systemPrompt: string;
+  /** Controlled transcript (owned by the parent for chat history). */
+  transcript: TranscriptEntry[];
+  /** Update the transcript. */
+  onTranscriptChange: (next: TranscriptEntry[]) => void;
 }
 
-interface TranscriptEntry {
+export interface TranscriptEntry {
   role: 'user' | 'assistant';
   content: string;
   pending?: boolean;
 }
 
-export function ChatPanel({ status, onProposals, systemPrompt }: ChatPanelProps) {
-  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+export function ChatPanel({
+  status,
+  onProposals,
+  systemPrompt,
+  transcript,
+  onTranscriptChange,
+}: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,8 +67,8 @@ export function ChatPanel({ status, onProposals, systemPrompt }: ChatPanelProps)
     const history: SerializedMessage[] = transcript
       .filter((e) => !e.pending)
       .map((e) => ({ role: e.role, content: e.content }));
-    setTranscript((prev) => [
-      ...prev,
+    onTranscriptChange([
+      ...transcript,
       { role: 'user', content: message },
       { role: 'assistant', content: '', pending: true },
     ]);
@@ -74,37 +83,47 @@ export function ChatPanel({ status, onProposals, systemPrompt }: ChatPanelProps)
         },
       });
       // Replace the placeholder with the real reply; hand proposals up.
-      setTranscript((prev) => {
-        const next = [...prev];
-        for (let i = next.length - 1; i >= 0; i--) {
-          if (next[i].pending) {
-            next[i] = { role: 'assistant', content: proposal.reply || '(no reply)' };
-            break;
-          }
+      const afterReply = [...transcript];
+      for (let i = afterReply.length - 1; i >= 0; i--) {
+        if (afterReply[i].pending) {
+          afterReply[i] = { role: 'assistant', content: proposal.reply || '(no reply)' };
+          break;
         }
-        return next;
-      });
+      }
+      onTranscriptChange(afterReply);
       if (proposal.proposed.length > 0) {
         onProposals(proposal.proposed);
       }
     } catch (e) {
-      // Replace the placeholder with an error note.
-      setTranscript((prev) => {
-        const next = [...prev];
-        for (let i = next.length - 1; i >= 0; i--) {
-          if (next[i].pending) {
-            next[i] = {
-              role: 'assistant',
-              content: `⚠️ Error: ${String(e)}`,
-            };
-            break;
-          }
+      const errStr = String(e);
+      // The "__cancelled__" sentinel means the user clicked Stop.
+      const cancelled = errStr.includes('__cancelled__');
+      // Replace the placeholder with an error note (or a stopped note).
+      const afterErr = [...transcript];
+      for (let i = afterErr.length - 1; i >= 0; i--) {
+        if (afterErr[i].pending) {
+          afterErr[i] = {
+            role: 'assistant',
+            content: cancelled ? '_(stopped)_' : `⚠️ Error: ${errStr}`,
+          };
+          break;
         }
-        return next;
-      });
-      setError(String(e));
+      }
+      onTranscriptChange(afterErr);
+      if (!cancelled) {
+        setError(errStr);
+      }
     } finally {
       setSending(false);
+    }
+  };
+
+  /** Cancel an in-flight request (the Stop button). */
+  const stop = async () => {
+    try {
+      await invoke('agent_stop');
+    } catch {
+      // ignore — the sentinel handling in send() covers the UX
     }
   };
 
@@ -161,8 +180,12 @@ export function ChatPanel({ status, onProposals, systemPrompt }: ChatPanelProps)
           disabled={!enabled || sending}
           rows={2}
         />
-        <Button variant="primary" onClick={() => void send()} disabled={!enabled || sending || !input.trim()}>
-          {sending ? 'Sending…' : 'Send'}
+        <Button
+          variant={sending ? 'danger' : 'primary'}
+          onClick={() => (sending ? void stop() : void send())}
+          disabled={!enabled || (!sending && !input.trim())}
+        >
+          {sending ? 'Stop' : 'Send'}
         </Button>
       </div>
     </div>

@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChatPanel } from './ChatPanel';
+import { ChatPanel, type TranscriptEntry } from './ChatPanel';
 import { ProposalQueue } from './ProposalQueue';
 import type { AgentStatus, ApplyResult, ProposedAction } from '../../types/agent';
 import './AgentPanel.css';
@@ -27,6 +27,7 @@ export function AgentDock({ buildSystemPrompt }: AgentDockProps) {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [queue, setQueue] = useState<ProposedAction[]>([]);
   const [appliedNote, setAppliedNote] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
 
   // Poll status on mount and when settings change (settings:changed event).
   const refreshStatus = async () => {
@@ -74,6 +75,8 @@ export function AgentDock({ buildSystemPrompt }: AgentDockProps) {
         <ChatPanel
           status={status}
           systemPrompt={systemPrompt}
+          transcript={transcript}
+          onTranscriptChange={setTranscript}
           onProposals={(p) => setQueue((prev) => [...prev, ...p])}
         />
       </div>

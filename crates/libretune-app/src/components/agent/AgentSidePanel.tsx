@@ -12,9 +12,15 @@
  */
 import { useCallback, useRef, useState, useEffect, MouseEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChatPanel } from './ChatPanel';
+import { ChatPanel, type TranscriptEntry } from './ChatPanel';
 import { ProposalQueue } from './ProposalQueue';
-import type { AgentStatus, ApplyResult, ProposedAction } from '../../types/agent';
+import type {
+  AgentStatus,
+  ApplyResult,
+  ChatHistory,
+  ChatSummary,
+  ProposedAction,
+} from '../../types/agent';
 import './AgentPanel.css';
 
 export interface AgentSidePanelProps {
@@ -41,6 +47,72 @@ export function AgentSidePanel({ width, onResize, onCollapse, onPopOut }: AgentS
   const [queueCollapsed, setQueueCollapsed] = useState(false);
   const isResizing = useRef(false);
 
+  // --- Chat history state (owned here so it can be saved/switched) ---
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [chatList, setChatList] = useState<ChatSummary[]>([]);
+  const [chatListOpen, setChatListOpen] = useState(false);
+
+  /** Persist the current transcript + id to the backend. Best-effort. */
+  const persistChat = useCallback(
+    async (id: string, messages: TranscriptEntry[]) => {
+      try {
+        const title =
+          messages.find((m) => m.role === 'user')?.content.slice(0, 60) || 'New chat';
+        const chat: ChatHistory = {
+          id,
+          title,
+          created_at: '',
+          updated_at: '',
+          messages: messages
+            .filter((m) => !m.pending)
+            .map((m) => ({ role: m.role, content: m.content })),
+        };
+        await invoke<ChatHistory>('agent_save_chat', { chat });
+        // Refresh the chat list so the sidebar stays in sync.
+        const list = await invoke<ChatSummary[]>('agent_list_chats');
+        setChatList(list);
+      } catch (e) {
+        console.error('Failed to persist chat:', e);
+      }
+    },
+    []
+  );
+
+  /** Start a fresh chat. */
+  const newChat = useCallback(() => {
+    setTranscript([]);
+    setCurrentChatId(null);
+    setChatListOpen(false);
+  }, []);
+
+  /** Switch to an existing chat by id (loads its messages). */
+  const openChat = useCallback(async (id: string) => {
+    try {
+      const chat = await invoke<ChatHistory>('agent_load_chat', { chatId: id });
+      setTranscript(chat.messages.map((m) => ({ role: m.role, content: m.content })));
+      setCurrentChatId(id);
+    } catch (e) {
+      console.error('Failed to load chat:', e);
+    }
+    setChatListOpen(false);
+  }, []);
+
+  /** Delete a chat from disk and the list. */
+  const deleteChat = useCallback(async (id: string) => {
+    try {
+      await invoke('agent_delete_chat', { chatId: id });
+      if (currentChatId === id) {
+        setTranscript([]);
+        setCurrentChatId(null);
+      }
+      const list = await invoke<ChatSummary[]>('agent_list_chats');
+      setChatList(list);
+    } catch (e) {
+      console.error('Failed to delete chat:', e);
+    }
+  }, [currentChatId]);
+
   const refreshStatus = async () => {
     try {
       const s = await invoke<AgentStatus>('agent_status');
@@ -52,6 +124,18 @@ export function AgentSidePanel({ width, onResize, onCollapse, onPopOut }: AgentS
 
   useEffect(() => {
     void refreshStatus();
+    // Load chat list + auto-open the most recent chat.
+    (async () => {
+      try {
+        const list = await invoke<ChatSummary[]>('agent_list_chats');
+        setChatList(list);
+        if (list.length > 0) {
+          await openChat(list[0].id);
+        }
+      } catch {
+        // non-fatal (no project loaded yet)
+      }
+    })();
     let unlisten: (() => void) | undefined;
     (async () => {
       try {
@@ -119,6 +203,28 @@ export function AgentSidePanel({ width, onResize, onCollapse, onPopOut }: AgentS
         <div className="agent-panel-header-actions">
           <button
             className="agent-panel-icon-btn"
+            onClick={() => setChatListOpen((o) => !o)}
+            title="Chat history"
+            aria-label="Chat history"
+          >
+            {/* list icon */}
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M2.5 3.5a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0 4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0 4a.5.5 0 0 1 .5-.5h6a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5z" />
+            </svg>
+          </button>
+          <button
+            className="agent-panel-icon-btn"
+            onClick={newChat}
+            title="New chat"
+            aria-label="New chat"
+          >
+            {/* plus icon */}
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z" />
+            </svg>
+          </button>
+          <button
+            className="agent-panel-icon-btn"
             onClick={onPopOut}
             title="Pop out to separate window"
             aria-label="Pop out"
@@ -143,14 +249,52 @@ export function AgentSidePanel({ width, onResize, onCollapse, onPopOut }: AgentS
         </div>
       </div>
 
+      {/* Chat history list (toggled by the list button) */}
+      {chatListOpen && (
+        <div className="agent-chat-list">
+          {chatList.length === 0 && (
+            <div className="agent-chat-list-empty">No saved chats</div>
+          )}
+          {chatList.map((c) => (
+            <div
+              key={c.id}
+              className={`agent-chat-list-item${currentChatId === c.id ? ' active' : ''}`}
+            >
+              <button className="agent-chat-list-item-title" onClick={() => void openChat(c.id)}>
+                {c.title}
+              </button>
+              <button
+                className="agent-chat-list-item-del"
+                title="Delete chat"
+                onClick={() => void deleteChat(c.id)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Chat fills the flexible area */}
       <div className="agent-panel-chat">
         <ChatPanel
           status={status}
           systemPrompt={DEFAULT_SYSTEM_PROMPT}
+          transcript={transcript}
+          onTranscriptChange={(next) => {
+            setTranscript(next);
+            // Persist on every change (debounce-free for simplicity; the write
+            // is cheap). On the first message, allocate an id.
+            const id =
+              currentChatId ??
+              `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            if (!currentChatId) {
+              setCurrentChatId(id);
+            }
+            void persistChat(id, next);
+          }}
           onProposals={(p) => {
             setQueue((prev) => [...prev, ...p]);
-            // Auto-expand the queue when new proposals arrive.
             setQueueCollapsed(false);
           }}
         />

@@ -95,6 +95,20 @@ pub async fn update_setting(
         "last_active_tab" => {
             settings.last_active_tab = if value.is_empty() { None } else { Some(value) }
         }
+        // UI layout state.
+        "sidebar_visible" => {
+            settings.sidebar_visible = value.parse().map_err(|_| "Invalid boolean value")?
+        }
+        "agent_panel_visible" => {
+            settings.agent_panel_visible = value.parse().map_err(|_| "Invalid boolean value")?
+        }
+        "selected_dashboard" => {
+            settings.selected_dashboard = if value.is_empty() { None } else { Some(value) }
+        }
+        "open_tabs" => {
+            // Store the JSON blob as-is; the frontend parses it.
+            settings.open_tabs = if value.is_empty() { None } else { Some(value) }
+        }
         "language" => settings.language = if value.is_empty() { None } else { Some(value) },
 
         // --- AI Assistant settings (all keys must have arms; see repo memory

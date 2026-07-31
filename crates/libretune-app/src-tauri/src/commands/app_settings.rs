@@ -32,6 +32,20 @@ pub(crate) struct Settings {
     #[serde(default)]
     pub(crate) last_active_tab: Option<String>,
 
+    // --- UI layout state (restored on launch) ---
+    /// Whether the left sidebar is visible.
+    #[serde(default = "default_true")]
+    pub(crate) sidebar_visible: bool,
+    /// Whether the AI assistant side panel is visible.
+    #[serde(default)]
+    pub(crate) agent_panel_visible: bool,
+    /// The selected dashboard file name (e.g. "Telemetry Live.ltdash.xml").
+    #[serde(default)]
+    pub(crate) selected_dashboard: Option<String>,
+    /// Serialized open tabs (id, title, icon, type, data) for session restore.
+    #[serde(default)]
+    pub(crate) open_tabs: Option<String>,
+
     /// Render table Y axis with the origin at the bottom-left (lowest load
     /// row at the bottom) instead of the top-left.
     #[serde(default)]

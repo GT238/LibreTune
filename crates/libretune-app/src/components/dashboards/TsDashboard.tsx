@@ -254,16 +254,28 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     const loadInitial = async () => {
       const dashes = await refreshDashboardList();
       
-      // If no initial path, select first available
+      // If no initial path, select the persisted dashboard or fall back to defaults.
       if (!selectedPath && dashes.length > 0) {
-        // Prefer Telemetry Live.ltdash.xml as the default dashboard
+        // 1. Prefer the last-selected dashboard (persisted in settings).
+        try {
+          const settings = await invoke<{ selected_dashboard?: string }>('get_settings');
+          if (settings.selected_dashboard) {
+            const saved = dashes.find(d => d.name === settings.selected_dashboard);
+            if (saved) {
+              setSelectedPath(saved.path);
+              return;
+            }
+          }
+        } catch { /* ignore — fall through to defaults */ }
+
+        // 2. Prefer Telemetry Live.ltdash.xml as the default dashboard
         const telemetryDash = dashes.find(d => d.name === 'Telemetry Live.ltdash.xml');
         if (telemetryDash) {
           setSelectedPath(telemetryDash.path);
           return;
         }
 
-        // Fall back to Basic.ltdash.xml if Telemetry Live isn't present
+        // 3. Fall back to Basic.ltdash.xml if Telemetry Live isn't present
         const basicDash = dashes.find(d => d.name === 'Basic.ltdash.xml');
         if (basicDash) {
           setSelectedPath(basicDash.path);
@@ -276,6 +288,13 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     };
     loadInitial();
   }, []);
+
+  // Persist the selected dashboard name whenever it changes.
+  useEffect(() => {
+    if (!selectedPath) return;
+    const name = selectedPath.split(/[\\/]/).pop() || '';
+    void invoke('update_setting', { key: 'selected_dashboard', value: name }).catch(() => {});
+  }, [selectedPath]);
 
   // Load selected dashboard (only when the selected path changes)
   useEffect(() => {
