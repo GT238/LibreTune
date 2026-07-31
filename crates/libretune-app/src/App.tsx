@@ -257,8 +257,37 @@ function AppContent() {
   // WASM Plugin panel state
   const [pluginPanelOpen, setPluginPanelOpen] = useState(false);
 
-  // AI assistant dock state
-  const [agentDockOpen, setAgentDockOpen] = useState(false);
+  // AI assistant side panel state (right-hand, non-modal). Toggle controls
+  // docked visibility; popping out hides the docked panel.
+  const [agentPanelVisible, setAgentPanelVisible] = useState(false);
+
+  // Pop the AI assistant out into its own window (mirrors the tab pop-out
+  // pattern in hooks/useTabPopout.ts). Uses hash routing handled by
+  // PopOutWindow.tsx + a localStorage handoff.
+  const handleAgentPopOut = useCallback(async () => {
+    const tabId = `agent-assistant`;
+    const storageKey = `popout-${tabId}`;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ data: null }));
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      const currentOrigin = window.location.origin;
+      const url = `${currentOrigin}/#/popout?tabId=${encodeURIComponent(tabId)}&type=agent&title=${encodeURIComponent('AI Assistant')}`;
+      const label = `popout-${tabId}`;
+      await new WebviewWindow(label, {
+        url,
+        title: 'AI Assistant',
+        width: 460,
+        height: 720,
+        center: true,
+        decorations: true,
+        devtools: true,
+      });
+      // Hide the docked panel once popped out.
+      setAgentPanelVisible(false);
+    } catch (e) {
+      console.error('[AgentPopOut] failed:', e);
+    }
+  }, []);
 
   // Sync status tracking (for partial sync warning)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -1332,10 +1361,25 @@ function AppContent() {
     setNewProjectDialogOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
     setBurnDialogOpen, setFirmwareUpdateDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
     setMathChannelsDialogOpen, setBaseMapDialogOpen, setTableComparisonOpen,
-    setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, setAgentDockOpen, setConnectionDialogOpen,
+    setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, agentPanelVisible, setAgentPanelVisible, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
     setTheme, setTabs, setTabContents, setActiveTabId,
-  }), [backendMenus, theme, sidebarVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs]);
+  }), [backendMenus, theme, sidebarVisible, agentPanelVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs]);
+
+  // Listen for the agent pop-out window's "dock back" signal: re-show the
+  // docked side panel. (Mirrors the tab:dock handling in useTabPopout.)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen('agent:dock', () => setAgentPanelVisible(true));
+      } catch {
+        // non-fatal
+      }
+    })();
+    return () => { unlisten?.(); };
+  }, []);
 
   // Toolbar items
   const toolbarItems: ToolbarItem[] = useMemo(() => buildToolbarItems({
@@ -1478,6 +1522,9 @@ function AppContent() {
         onConnectionClick={() => setConnectionDialogOpen(true)}
         projectName={currentProject?.name}
         unitsSystem={unitsSystem}
+        agentPanelVisible={agentPanelVisible}
+        onAgentPanelCollapse={() => setAgentPanelVisible(false)}
+        onAgentPanelPopOut={handleAgentPopOut}
         realtimeChannels={statusBarChannels}
         channelInfoMap={channelInfoMap}
       >
@@ -1625,8 +1672,6 @@ function AppContent() {
         setOnboardingOpen={setOnboardingOpen}
         pluginPanelOpen={pluginPanelOpen}
         setPluginPanelOpen={setPluginPanelOpen}
-        agentDockOpen={agentDockOpen}
-        setAgentDockOpen={setAgentDockOpen}
       />
     </>
   );

@@ -21,6 +21,7 @@ This section provides in-depth technical documentation for LibreTune's core algo
 ### Core Systems
 - **[Version Control](./version-control.md)** - Git integration, tune fingerprinting, and migration detection
 - **[Lua Scripting](./lua-scripting.md)** - Sandboxed runtime, API reference, and security model
+- **[AI Assistant](./ai-assistant.md)** - Bring-your-own-LLM agent loop, provider trait, validation extensions
 
 ## Philosophy
 

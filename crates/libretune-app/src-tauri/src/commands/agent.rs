@@ -8,12 +8,17 @@
 
 use crate::state::AppState;
 use libretune_core::action_scripting::Action;
-use libretune_core::agent::orchestrator::{run_turn, OrchestratorInputs, Proposal};
+use libretune_core::agent::orchestrator::{
+    run_turn, OrchestratorInputs, Proposal, ReadToolExecutor,
+};
 use libretune_core::agent::tiers::ConstantSafetyTier;
+use libretune_core::agent::tools;
 use libretune_core::autotune::AutoTuneAuthorityLimits;
 use libretune_core::llm::types::{LlmError, Message};
 use libretune_core::llm::{LlmClient, ProviderConfig};
+use libretune_core::tune::TuneValue;
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 /// Construct a `ProviderConfig` from stored settings.
 fn config_from_settings(s: &crate::Settings) -> ProviderConfig {
@@ -91,6 +96,171 @@ pub struct AgentStatus {
     pub configured: bool,
 }
 
+/// Executes the assistant's read-only tool calls against the live ECU/tune
+/// state. Held by `agent_send_message` and handed to the orchestrator so the
+/// model's "let me read your VE table" calls actually return data instead of
+/// stalling.
+///
+/// Holds a [`tauri::AppHandle`] (cheap to clone) to reach managed `AppState`
+/// without borrowing the `tauri::State` lifetime into the executor.
+struct LiveReadExecutor {
+    app: tauri::AppHandle,
+}
+
+#[async_trait::async_trait]
+impl ReadToolExecutor for LiveReadExecutor {
+    fn handles(&self, tool_name: &str) -> bool {
+        matches!(
+            tool_name,
+            tools::tool_names::READ_TABLE
+                | tools::tool_names::READ_CONSTANT
+                | tools::tool_names::LIST_TABLES
+                | tools::tool_names::LIST_FEATURES
+        )
+    }
+
+    async fn execute(&self, tool_name: &str, arguments: &str) -> String {
+        match tool_name {
+            tools::tool_names::LIST_TABLES => self.exec_list_tables().await,
+            tools::tool_names::LIST_FEATURES => self.exec_list_features().await,
+            tools::tool_names::READ_TABLE => {
+                let name = json_str_field(arguments, "table_name");
+                match name {
+                    Some(n) => self.exec_read_table(&n).await,
+                    None => json_err("read_table requires 'table_name'"),
+                }
+            }
+            tools::tool_names::READ_CONSTANT => {
+                let name = json_str_field(arguments, "name");
+                match name {
+                    Some(n) => self.exec_read_constant(&n).await,
+                    None => json_err("read_constant requires 'name'"),
+                }
+            }
+            _ => json_err(&format!("unhandled read tool '{tool_name}'")),
+        }
+    }
+}
+
+impl LiveReadExecutor {
+    async fn exec_list_tables(&self) -> String {
+        let state = self.app.state::<AppState>();
+        let def_guard = state.definition.lock().await;
+        let Some(def) = def_guard.as_ref() else {
+            return json_err("No INI definition loaded");
+        };
+        let mut entries: Vec<serde_json::Value> = Vec::new();
+        for t in def.tables.values() {
+            entries.push(serde_json::json!({
+                "name": t.name,
+                "title": t.title,
+                "role": format!("{:?}", t.role),
+                "dimensions": [t.x_size, t.y_size],
+                "x_label": t.x_label,
+                "y_label": t.y_label,
+            }));
+        }
+        serde_json::to_string(&serde_json::json!({ "tables": entries }))
+            .unwrap_or_else(|_| json_err("serialize failed"))
+    }
+
+    async fn exec_list_features(&self) -> String {
+        let state = self.app.state::<AppState>();
+        let def_guard = state.definition.lock().await;
+        let Some(def) = def_guard.as_ref() else {
+            return json_err("No INI definition loaded");
+        };
+        let mut entries: Vec<serde_json::Value> = Vec::new();
+        for c in def.constants.values() {
+            if !c.bit_options.is_empty() {
+                entries.push(serde_json::json!({
+                    "name": c.name,
+                    "label": c.label,
+                    "options": c.bit_options,
+                    "help": c.help,
+                }));
+            }
+        }
+        serde_json::to_string(&serde_json::json!({ "features": entries }))
+            .unwrap_or_else(|_| json_err("serialize failed"))
+    }
+
+    async fn exec_read_table(&self, name: &str) -> String {
+        let state = self.app.state::<AppState>();
+        // Reuse the existing internal table reader so the model sees the same
+        // data the table editors do.
+        match crate::get_table_data_internal(&state, name).await {
+            Ok(t) => serde_json::to_string(&serde_json::json!({
+                "name": t.name,
+                "title": t.title,
+                "x_bins": t.x_bins,
+                "y_bins": t.y_bins,
+                "z_values": t.z_values,
+                "x_axis": t.x_axis_name,
+                "y_axis": t.y_axis_name,
+            }))
+            .unwrap_or_else(|_| json_err("serialize failed")),
+            Err(e) => json_err(&format!("could not read table '{name}': {e}")),
+        }
+    }
+
+    async fn exec_read_constant(&self, name: &str) -> String {
+        let state = self.app.state::<AppState>();
+
+        // 1. Read the constant metadata under the definition lock, then drop
+        //    it before acquiring the tune lock (avoids nested-lock deadlocks).
+        let (label, units, min, max, bit_options, help) = {
+            let def_guard = state.definition.lock().await;
+            let Some(def) = def_guard.as_ref() else {
+                return json_err("No INI definition loaded");
+            };
+            let Some(c) = def.constants.get(name) else {
+                return json_err(&format!("constant '{name}' not found"));
+            };
+            (
+                c.label.clone(),
+                c.units.clone(),
+                c.min,
+                c.max,
+                c.bit_options.clone(),
+                c.help.clone(),
+            )
+        };
+
+        // 2. Read the current value from the loaded tune if present.
+        let current: Option<f64> = {
+            let tune_guard = state.current_tune.lock().await;
+            match tune_guard.as_ref().and_then(|tune| tune.get_value(name)) {
+                Some(TuneValue::Scalar(f)) => Some(*f),
+                Some(TuneValue::Bool(b)) => Some(if *b { 1.0 } else { 0.0 }),
+                _ => None,
+            }
+        };
+
+        serde_json::to_string(&serde_json::json!({
+            "name": name,
+            "label": label,
+            "units": units,
+            "min": min,
+            "max": max,
+            "current_value": current,
+            "options": bit_options,
+            "help": help,
+        }))
+        .unwrap_or_else(|_| json_err("serialize failed"))
+    }
+}
+
+fn json_str_field(arguments: &str, field: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()
+        .and_then(|v| v.get(field)?.as_str().map(|s| s.to_string()))
+}
+
+fn json_err(msg: &str) -> String {
+    serde_json::json!({ "error": msg }).to_string()
+}
+
 /// Run one assistant turn. Returns a [`Proposal`] for the review queue.
 ///
 /// Does not apply anything. The frontend renders `proposal.proposed` as a
@@ -112,6 +282,7 @@ pub async fn agent_send_message(
     }
 
     let client = build_client(&s).map_err(|e| e.to_string())?;
+    let executor = LiveReadExecutor { app: app.clone() };
 
     let history: Vec<Message> = request.history.into_iter().map(Into::into).collect();
     let inputs = OrchestratorInputs {
@@ -122,7 +293,7 @@ pub async fn agent_send_message(
     };
 
     let authority = default_authority();
-    run_turn(&client, &inputs, &authority)
+    run_turn(&client, &inputs, &authority, Some(&executor))
         .await
         .map_err(|e| e.to_string())
 }

@@ -225,6 +225,53 @@ Available placeholders:
 
 ---
 
+## AI Assistant
+
+The **AI Assistant** is a bring-your-own-LLM co-pilot that can help you tune and
+configure your ECU. See [AI Assistant](../features/ai-assistant.md) for full
+usage details.
+
+> ⚠️ **At your own risk.** The assistant only ever *proposes* changes; nothing
+> is applied or burned automatically.
+
+### Enabling
+
+1. Scroll to the **AI Assistant (at your own risk)** section.
+2. Read the risk warning and check the acknowledgement box.
+3. Configure the provider (see below).
+4. Check **Enable AI Assistant**.
+5. Click **Apply** (save without closing) or **OK** (save and close).
+
+### Provider
+
+- **OpenAI** — hosted OpenAI, or any OpenAI-compatible endpoint (OpenRouter,
+  Ollama, LM Studio, vLLM).
+- **Anthropic** — Claude models.
+- **Google** — Gemini models.
+
+### Base URL
+
+Leave empty for the provider default. For a local model, set this to the local
+endpoint, e.g. `http://localhost:11434/v1` for Ollama.
+
+### API Key
+
+Your provider key. Optional for local/no-auth endpoints. Stored locally in the
+settings file.
+
+### Model
+
+A tool/function-calling-capable model (e.g. `gpt-4o`,
+`claude-3-5-sonnet-20241022`, `gemini-1.5-pro`).
+
+### Capability Tier
+
+- **Read / diagnose only** — explain and analyze; cannot propose changes.
+- **Propose ECU configuration changes** — propose constant changes.
+- **Propose tune edits** — propose table-cell and bulk edits.
+
+---
+
 ## AutoTune Settings
 
 Default values for AutoTune parameters.

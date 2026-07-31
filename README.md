@@ -41,6 +41,7 @@ Data logger with configurable sample rates, playback controls, CSV import/export
 Project-based workflow with restore points, Git-based tune versioning, CSV export/import, TunerStudio project import, INI version tracking with automatic tune migration, and change annotations. Online INI search from Speeduino and rusEFI GitHub repos.
 
 ### Additional
+- **AI Assistant**: Bring-your-own-LLM co-pilot (OpenAI / Anthropic / Google / local Ollama) that reads your tables, diagnoses problems, and *proposes* validated, authority-clamped changes for explicit review — nothing burns automatically. Docked side panel, pop-out-able.
 - **Multi-monitor**: Pop out any tab to its own window with bidirectional sync
 - **Unit preferences**: Temperature (°C/°F/K), pressure (kPa/PSI/bar/inHg), AFR/Lambda
 - **Performance calculator**: Estimated HP/torque curves and acceleration times
@@ -155,6 +156,8 @@ libretune/
 │   │       ├── autotune/       # AutoTune algorithms
 │   │       ├── tune/           # Tune file management
 │   │       ├── dash/           # Dashboard format (incl. layout.rs defaults)
+│   │       ├── agent/          # AI assistant orchestrator, tools, safety tiers
+│   │       ├── llm/            # LLM provider trait + OpenAI/Anthropic/Google impls
 │   │       └── project/        # Project, restore points, Git versioning
 │   └── libretune-app/          # Tauri desktop application
 │       ├── src/                # React frontend (TypeScript)

@@ -50,6 +50,9 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   });
   const [localUnits, setLocalUnits] = useState('metric');
   const [autoBurnOnClose, setAutoBurnOnClose] = useState(false);
+  // Save feedback: 'idle' (nothing shown), 'saving', 'saved', 'error'.
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [tableYAxisBottom, setTableYAxisBottom] = useState(false);
   const [tableCursorColor, setTableCursorColor] = useState('');
@@ -129,6 +132,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     setLocalTheme(theme);
     // Load settings from backend
     if (isOpen) {
+      setSaveStatus('idle');
+      setSaveError(null);
       invoke('get_settings').then((settings: any) => {
         if (settings.units_system !== undefined) setLocalUnits(settings.units_system);
         if (settings.language) {
@@ -295,7 +300,25 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     }
   }, [currentProject]);
 
-  const handleApply = useCallback(async () => {
+  // Persist all settings to the backend WITHOUT closing the dialog. Each
+  // setting is saved independently so one failure cannot silently abort the
+  // rest (this was the root cause of the GLM/z.ai info not saving — a thrown
+  // invoke aborted the whole sequence). Returns the list of per-setting
+  // errors (empty on full success).
+  const saveSettings = useCallback(async (): Promise<string[]> => {
+    setSaveStatus('saving');
+    setSaveError(null);
+    const errors: string[] = [];
+    // Helper: invoke update_setting, capturing any error instead of letting
+    // it abort the whole save.
+    const set = async (key: string, value: string) => {
+      try {
+        await invoke('update_setting', { key, value });
+      } catch (e) {
+        errors.push(`${key}: ${String(e)}`);
+      }
+    };
+
     onThemeChange(localTheme);
     // Apply language change immediately and persist it. Dynamically import the
     // i18n instance so loading this dialog module doesn't drag in i18next on
@@ -311,76 +334,96 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     try {
       localStorage.setItem(LANGUAGE_STORAGE_KEY, localLanguage);
     } catch { /* ignore */ }
-    await invoke('update_setting', { key: 'language', value: localLanguage });
+    await set('language', localLanguage);
     // Update units setting
     if (localUnits !== 'metric' && localUnits !== 'imperial') {
       setLocalUnits('metric');
-      await invoke('update_setting', { key: 'units_system', value: 'metric' });
+      await set('units_system', 'metric');
     } else {
-      await invoke('update_setting', { key: 'units_system', value: localUnits });
+      await set('units_system', localUnits);
     }
     // Update auto-burn setting
-    await invoke('update_setting', { key: 'auto_burn_on_close', value: autoBurnOnClose.toString() });
+    await set('auto_burn_on_close', autoBurnOnClose.toString());
     // Update status bar channels
-    await invoke('update_setting', { key: 'status_bar_channels', value: JSON.stringify(statusBarChannels) });
+    await set('status_bar_channels', JSON.stringify(statusBarChannels));
     // Update indicator panel settings
-    await invoke('update_setting', { key: 'indicator_column_count', value: indicatorColumnCount });
-    await invoke('update_setting', { key: 'indicator_fill_empty', value: indicatorFillEmpty.toString() });
-    await invoke('update_setting', { key: 'indicator_text_fit', value: indicatorTextFit });
+    await set('indicator_column_count', indicatorColumnCount);
+    await set('indicator_fill_empty', indicatorFillEmpty.toString());
+    await set('indicator_text_fit', indicatorTextFit);
     // Update heatmap settings
-    await invoke('update_setting', { key: 'heatmap_value_scheme', value: heatmapValueScheme });
-    await invoke('update_setting', { key: 'heatmap_change_scheme', value: heatmapChangeScheme });
-    await invoke('update_setting', { key: 'heatmap_coverage_scheme', value: heatmapCoverageScheme });
+    await set('heatmap_value_scheme', heatmapValueScheme);
+    await set('heatmap_change_scheme', heatmapChangeScheme);
+    await set('heatmap_coverage_scheme', heatmapCoverageScheme);
     // Update gauge settings
-    await invoke('update_setting', { key: 'gauge_snap_to_grid', value: gaugeSnapToGrid.toString() });
-    await invoke('update_setting', { key: 'gauge_free_move', value: gaugeFreeMove.toString() });
-    await invoke('update_setting', { key: 'gauge_lock', value: gaugeLock.toString() });
-    await invoke('update_setting', { key: 'auto_sync_gauge_ranges', value: autoSyncGaugeRanges.toString() });
+    await set('gauge_snap_to_grid', gaugeSnapToGrid.toString());
+    await set('gauge_free_move', gaugeFreeMove.toString());
+    await set('gauge_lock', gaugeLock.toString());
+    await set('auto_sync_gauge_ranges', autoSyncGaugeRanges.toString());
     // Update version control settings
-    await invoke('update_setting', { key: 'auto_commit_on_save', value: autoCommitOnSave });
-    await invoke('update_setting', { key: 'commit_message_format', value: commitMessageFormat });
+    await set('auto_commit_on_save', autoCommitOnSave);
+    await set('commit_message_format', commitMessageFormat);
     // Update runtime packet mode
-    await invoke('update_setting', { key: 'runtime_packet_mode', value: runtimePacketMode });
-    // Update AI assistant settings. Order matters: ack first, then enable,
-    // so the backend's enable-guards pass. Provider/key changes reset ack on
-    // the backend side; we re-send ack after to keep them consistent.
-    await invoke('update_setting', { key: 'ai_provider', value: aiProvider });
-    await invoke('update_setting', { key: 'ai_base_url', value: aiBaseUrl });
-    await invoke('update_setting', { key: 'ai_api_key', value: aiApiKey });
-    await invoke('update_setting', { key: 'ai_model', value: aiModel });
-    await invoke('update_setting', { key: 'ai_capability_tier', value: aiCapabilityTier });
-    await invoke('update_setting', { key: 'ai_risk_acknowledged', value: aiRiskAcked.toString() });
-    await invoke('update_setting', { key: 'ai_assistant_enabled', value: aiEnabled.toString() });
-    await invoke('update_setting', { key: 'auto_reconnect_after_controller_command', value: autoReconnectAfterControllerCommand.toString() });
-    await invoke('update_setting', { key: 'auto_reconnect_after_firmware', value: autoReconnectAfterFirmware.toString() });
+    await set('runtime_packet_mode', runtimePacketMode);
+    // Update AI assistant settings. Order matters: provider/key first, then
+    // capability tier, then ack, then enable — so the backend's enable-guard
+    // (which requires risk-ack) sees the ack we just sent. Provider/key
+    // changes reset the ack on the backend side; we re-send it afterwards.
+    await set('ai_provider', aiProvider);
+    await set('ai_base_url', aiBaseUrl);
+    await set('ai_api_key', aiApiKey);
+    await set('ai_model', aiModel);
+    await set('ai_capability_tier', aiCapabilityTier);
+    await set('ai_risk_acknowledged', aiRiskAcked.toString());
+    await set('ai_assistant_enabled', aiEnabled.toString());
+    await set('auto_reconnect_after_controller_command', autoReconnectAfterControllerCommand.toString());
+    await set('auto_reconnect_after_firmware', autoReconnectAfterFirmware.toString());
     // Update auto-record settings
-    await invoke('update_setting', { key: 'auto_record_enabled', value: autoRecordEnabled.toString() });
-    await invoke('update_setting', { key: 'key_on_threshold_rpm', value: keyOnThresholdRpm.toString() });
-    await invoke('update_setting', { key: 'key_off_timeout_sec', value: keyOffTimeoutSec.toString() });
+    await set('auto_record_enabled', autoRecordEnabled.toString());
+    await set('key_on_threshold_rpm', keyOnThresholdRpm.toString());
+    await set('key_off_timeout_sec', keyOffTimeoutSec.toString());
     // Update alert rules settings
-    await invoke('update_setting', { key: 'alert_large_change_enabled', value: alertLargeChangeEnabled.toString() });
-    await invoke('update_setting', { key: 'alert_large_change_abs', value: alertLargeChangeAbs.toString() });
-    await invoke('update_setting', { key: 'alert_large_change_percent', value: alertLargeChangePercent.toString() });
-    
+    await set('alert_large_change_enabled', alertLargeChangeEnabled.toString());
+    await set('alert_large_change_abs', alertLargeChangeAbs.toString());
+    await set('alert_large_change_percent', alertLargeChangePercent.toString());
+
     // Update hotkey bindings
     try {
       await invoke('save_hotkey_bindings', { bindings: hotkeyBindings });
     } catch (e) {
-      console.error('Failed to save hotkey bindings:', e);
+      errors.push(`hotkey_bindings: ${String(e)}`);
     }
-    
+
     // Update project-specific settings
     if (currentProject) {
       try {
         await invoke('update_project_auto_connect', { autoConnect });
       } catch (e) {
-        console.error('Failed to update auto-connect setting:', e);
+        errors.push(`project_auto_connect: ${String(e)}`);
       }
     }
-    
+
     onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode, autoSyncGaugeRanges });
+
+    if (errors.length > 0) {
+      setSaveStatus('error');
+      setSaveError(errors.join('\n'));
+    } else {
+      setSaveStatus('saved');
+    }
+    return errors;
+  }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, aiProvider, aiBaseUrl, aiApiKey, aiModel, aiCapabilityTier, aiRiskAcked, aiEnabled, autoReconnectAfterControllerCommand, autoReconnectAfterFirmware, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange]);
+
+  // Windows-convention buttons:
+  //  - Apply: save WITHOUT closing (so the user can verify it worked).
+  //  - OK:     save AND close.
+  const handleApply = useCallback(async () => {
+    await saveSettings();
+  }, [saveSettings]);
+
+  const handleOk = useCallback(async () => {
+    await saveSettings();
     onClose();
-  }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoReconnectAfterFirmware, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
+  }, [saveSettings, onClose]);
 
   return (
     <Dialog
@@ -1243,8 +1286,27 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         </div>
 
       <Dialog.Footer>
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" onClick={handleApply}>Apply</Button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }}>
+          {saveStatus === 'saving' && (
+            <span style={{ fontSize: '12px', opacity: 0.7 }}>Saving…</span>
+          )}
+          {saveStatus === 'saved' && (
+            <span style={{ fontSize: '12px', color: '#80d090' }}>Settings saved.</span>
+          )}
+          {saveStatus === 'error' && (
+            <span
+              title={saveError ?? ''}
+              style={{ fontSize: '12px', color: '#f0a0a0', cursor: 'help', maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              Some settings failed to save (hover for details)
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="secondary" onClick={handleApply} disabled={saveStatus === 'saving'}>Apply</Button>
+          <Button variant="primary" onClick={handleOk} disabled={saveStatus === 'saving'}>OK</Button>
+        </div>
       </Dialog.Footer>
     </Dialog>
   );

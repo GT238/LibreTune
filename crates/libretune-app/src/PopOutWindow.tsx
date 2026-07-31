@@ -16,6 +16,7 @@ import { TableEditor, TableData as TunerTableData, AutoTune, DataLogView } from 
 import CurveEditor, { CurveData, SimpleGaugeInfo } from './components/curves/CurveEditor';
 import TsDashboard from './components/dashboards/TsDashboard';
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from './components/dialogs/DialogRenderer';
+import { AgentDock } from './components/agent/AgentDock';
 import { useRealtimeStore } from './stores/realtimeStore';
 import { ArrowLeftToLine, X } from 'lucide-react';
 import './styles';
@@ -48,7 +49,7 @@ interface BackendCurveData {
 
 interface PopOutData {
   tabId: string;
-  type: 'dashboard' | 'table' | 'curve' | 'dialog' | 'settings' | 'autotune' | 'datalog';
+  type: 'dashboard' | 'table' | 'curve' | 'dialog' | 'settings' | 'autotune' | 'datalog' | 'agent';
   title: string;
   data?: TunerTableData | CurveData | RendererDialogDef | string;
   gauge?: SimpleGaugeInfo | null;
@@ -310,13 +311,19 @@ export default function PopOutWindow() {
     if (!popOutData) return;
 
     try {
-      // Emit dock event with current data
-      await emit('tab:dock', {
-        tabId: popOutData.tabId,
-        type: popOutData.type,
-        title: popOutData.title,
-        data: popOutData.data,
-      });
+      if (popOutData.type === 'agent') {
+        // The agent isn't a tab — signal the main window to re-show the
+        // docked panel instead of restoring a tab.
+        await emit('agent:dock', {});
+      } else {
+        // Emit dock event with current data
+        await emit('tab:dock', {
+          tabId: popOutData.tabId,
+          type: popOutData.type,
+          title: popOutData.title,
+          data: popOutData.data,
+        });
+      }
 
       // Close this window
       await getCurrentWindow().close();
@@ -412,6 +419,16 @@ export default function PopOutWindow() {
       
       case 'datalog':
         return <DataLogView />;
+      
+      case 'agent':
+        // The assistant self-polls status and listens for settings:changed, so
+        // no data handoff is needed — just render the docked-style layout in a
+        // standalone window.
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '8px' }}>
+            <AgentDock />
+          </div>
+        );
       
       default:
         return <div className="popout-unsupported">Unsupported content type</div>;

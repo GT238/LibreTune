@@ -83,40 +83,148 @@ pub struct OrchestratorInputs {
     pub current_table_values: HashMap<String, HashMap<(u16, u16), f64>>,
 }
 
-/// Run one agent turn. Does not mutate any ECU state.
+/// Executes read-only tool calls against the live ECU/tune state.
+///
+/// When the model emits a read tool (e.g. `read_table`, `list_tables`,
+/// `summarize_tune_context`), the orchestrator hands it here and feeds the
+/// returned JSON string back to the model as a tool-result message, then calls
+/// the model again — closing the loop so "let me look at your VE table" can
+/// actually return an analysis.
+///
+/// Implementations live in the Tauri layer (which has access to `AppState`);
+/// the core library only defines the contract so the loop is testable without
+/// a live provider or ECU.
+#[async_trait::async_trait]
+pub trait ReadToolExecutor: Send + Sync {
+    /// Returns `true` if this executor handles the named tool.
+    fn handles(&self, tool_name: &str) -> bool;
+
+    /// Execute one read tool call, returning a JSON string to feed back to the
+    /// model. The string is inserted verbatim into a tool-result message.
+    async fn execute(&self, tool_name: &str, arguments: &str) -> String;
+}
+
+/// Is this tool call a read (needs execution + a follow-up turn) vs a propose
+/// (maps directly to an `Action` for the review queue)?
+fn is_read_tool(name: &str) -> bool {
+    matches!(
+        name,
+        tools::tool_names::READ_TABLE
+            | tools::tool_names::READ_CONSTANT
+            | tools::tool_names::LIST_TABLES
+            | tools::tool_names::LIST_FEATURES
+            | tools::tool_names::SUMMARIZE_TUNE
+            | tools::tool_names::TUNE_HEALTH
+    )
+}
+
+/// Maximum number of read→respond round-trips before forcing the loop to stop.
+/// Caps runaway loops and cost.
+const MAX_READ_ROUNDS: usize = 6;
+
+/// Run one user turn to completion. Does not mutate any ECU state.
+///
+/// This loops: it calls the model, and if the model emits **read** tool calls
+/// it executes them (via `read_executor`) and calls the model again with the
+/// results, until the model emits a final text reply or only propose tool
+/// calls. Propose calls accumulate into the returned [`Proposal`].
 pub async fn run_turn(
     client: &LlmClient,
     inputs: &OrchestratorInputs,
     authority: &AutoTuneAuthorityLimits,
+    read_executor: Option<&dyn ReadToolExecutor>,
 ) -> Result<Proposal, LlmError> {
-    // 1. Assemble the request.
-    let mut messages = Vec::with_capacity(inputs.history.len() + 2);
+    // 1. Assemble the initial request.
+    let mut messages: Vec<Message> = Vec::with_capacity(inputs.history.len() + 2);
     messages.push(Message::system(&inputs.system_prompt));
     messages.extend(inputs.history.iter().cloned());
     messages.push(Message::user(&inputs.user_message));
 
-    let req = ChatRequest::new(messages).with_tools(tools::catalogue());
-
-    // 2. Call the provider.
-    let resp = client.chat(&req).await?;
-
-    // 3. Map tool calls → actions → validated/clamped proposal items.
-    let mut proposed: Vec<ProposedAction> = Vec::with_capacity(resp.tool_calls.len());
+    // Accumulators across rounds.
+    let mut proposed: Vec<ProposedAction> = Vec::new();
     let mut all_valid = true;
-    for tc in &resp.tool_calls {
-        let mapped = map_tool_call(tc, inputs, authority);
-        if matches!(mapped.validation, ValidationResult::Failed { .. }) {
-            all_valid = false;
+    let mut last_usage: Option<crate::llm::types::Usage> = None;
+    let mut last_reply = String::new();
+    let mut last_finish_reason = FinishReason::Stop;
+
+    // 2. Multi-turn loop: read tools are executed and fed back; propose tools
+    //    accumulate. Bounded by MAX_READ_ROUNDS to cap cost/runaways.
+    for _round in 0..=MAX_READ_ROUNDS {
+        let req = ChatRequest::new(messages.clone()).with_tools(tools::catalogue());
+        let resp = client.chat(&req).await?;
+
+        last_reply = resp.content.clone();
+        last_finish_reason = resp.finish_reason.clone();
+        if resp.usage.is_some() {
+            last_usage = resp.usage.clone();
         }
-        proposed.push(mapped);
+
+        // Partition tool calls into reads (need execution) and proposes
+        // (become review-queue items).
+        let (reads, proposes): (Vec<&ToolCall>, Vec<&ToolCall>) = resp
+            .tool_calls
+            .iter()
+            .partition(|tc| is_read_tool(&tc.name));
+
+        // Map propose calls into ProposedActions.
+        for tc in &proposes {
+            let mapped = map_tool_call(tc, inputs, authority);
+            if matches!(mapped.validation, ValidationResult::Failed { .. }) {
+                all_valid = false;
+            }
+            proposed.push(mapped);
+        }
+
+        // If there are no read calls, this round is done — the model either
+        // emitted a plain reply or only proposes.
+        if reads.is_empty() {
+            break;
+        }
+
+        // Append the assistant's tool-call message to the history so the model
+        // sees what it asked for, then append a tool-result message for each
+        // read call.
+        messages.push(Message {
+            role: crate::llm::types::MessageRole::Assistant,
+            content: resp.content.clone(),
+            tool_calls: resp.tool_calls.clone(),
+            tool_name: None,
+        });
+
+        for tc in &reads {
+            let result = match read_executor {
+                Some(ex) if ex.handles(&tc.name) => ex.execute(&tc.name, &tc.arguments).await,
+                _ => {
+                    // No executor available — tell the model the read failed so
+                    // it can fall back to reasoning instead of stalling.
+                    format!(
+                        "{{\"error\":\"no executor available for read tool '{}'; cannot fetch live data\"}}",
+                        tc.name
+                    )
+                }
+            };
+            messages.push(Message {
+                role: crate::llm::types::MessageRole::Tool,
+                content: result,
+                tool_calls: Vec::new(),
+                tool_name: Some(tc.name.clone()),
+            });
+        }
+
+        // If we've hit the round cap, tell the model to wrap up.
+        if _round == MAX_READ_ROUNDS {
+            messages.push(Message::user(
+                "I've gathered enough data. Please give me your final analysis and any proposed changes.",
+            ));
+        }
     }
 
     Ok(Proposal {
-        reply: resp.content.clone(),
-        finish_reason: finish_reason_str(&resp.finish_reason),
+        reply: last_reply,
+        finish_reason: finish_reason_str(&last_finish_reason),
         proposed,
         all_valid,
-        usage: resp.usage,
+        usage: last_usage,
     })
 }
 

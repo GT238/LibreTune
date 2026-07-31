@@ -22,6 +22,21 @@ Yes. Use **File → Import TS Project** to import your TunerStudio project folde
 
 Yes. LibreTune uses the same INI format as TunerStudio. Your existing INI files should work without modification.
 
+### Can the AI Assistant tune my car for me?
+
+No — and that's deliberate. The AI Assistant is a **co-pilot**: it can read your
+tables, diagnose problems, and *propose* changes, but it never applies or burns
+anything automatically. Every proposal flows to a review queue where you accept
+or reject each change before it's staged to the working tune. Burning to the ECU
+is always a separate manual step. See [AI Assistant](./features/ai-assistant.md)
+for the full safety model.
+
+### Do I need an OpenAI account to use the AI Assistant?
+
+No. The assistant is **bring-your-own-LLM**. You can use OpenAI, Anthropic,
+Google, or run a local model (e.g. via Ollama) so your data never leaves your
+machine. See [Providers](./features/ai-assistant.md#providers).
+
 ## Connection Issues
 
 ### My ECU doesn't appear in the port list

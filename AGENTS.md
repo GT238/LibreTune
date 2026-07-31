@@ -146,6 +146,15 @@ The project aims to provide professional ECU tuning workflow and functionality w
 - Template structure: name, description, ECU type, INI pattern, default connection settings
 - Frontend: Template picker in NewProjectDialog with 3-mode flow (select template → configure or scratch)
 
+### 12. AI Assistant (Bring-Your-Own-LLM)
+- Core: `crates/libretune-core/src/agent/` (orchestrator, tools, context, summarize, safety, tiers)
+- LLM providers: `crates/libretune-core/src/llm/` (Provider trait + native OpenAI/Anthropic/Google impls over reqwest)
+- Backend commands: `crates/libretune-app/src-tauri/src/commands/agent.rs` (agent_status, agent_send_message, agent_apply_proposals)
+- Frontend: `crates/libretune-app/src/components/agent/` (AgentSidePanel, ChatPanel, ProposalQueue)
+- Features: docked side panel (resizable, pop-out-able), multi-turn read loop (ReadToolExecutor), per-item review queue with safety-tier badges, authority clamping, INI validation
+- Safety: the model only ever PROPOSES; nothing burns automatically. Gated by an "at your own risk" enablement (RiskAcknowledgement shared primitive). Settings reset risk-ack on provider/key change.
+- Gap closures motivated by this feature: extended validate_action_set (min/max, cell bounds, DataType range, bits enum); TableRole enum + infer_table_roles(); summarize_tune_context(); constant safety tiering.
+
 ## Development Commands
 
 ### Backend (Rust)
