@@ -153,20 +153,31 @@ pub(crate) async fn update_table_z_values_internal(
     table_name: &str,
     z_values: Vec<Vec<f64>>,
 ) -> Result<(), String> {
+    // Snapshot only what we need from the definition, then drop the lock
+    // before doing any ECU I/O below — holding it across a blocking
+    // conn.write_memory() call starves every other command that needs the
+    // definition (e.g. load_tune, table/constant reads).
+    let (constant, endianness, default_page_bytes) = {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+        let table = def
+            .get_table_by_name_or_map(table_name)
+            .ok_or_else(|| format!("Table {} not found", table_name))?;
+        let constant = def
+            .constants
+            .get(&table.map)
+            .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?
+            .clone();
+        let default_page_bytes = def
+            .page_sizes
+            .get(constant.page as usize)
+            .copied()
+            .unwrap_or(256) as usize;
+        (constant, def.endianness, default_page_bytes)
+    };
+
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
     let mut cache_guard = state.tune_cache.lock().await;
-
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-
-    let table = def
-        .get_table_by_name_or_map(table_name)
-        .ok_or_else(|| format!("Table {} not found", table_name))?;
-
-    let constant = def
-        .constants
-        .get(&table.map)
-        .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
 
     // Flatten z_values
     let flat_values: Vec<f64> = z_values.into_iter().flatten().collect();
@@ -188,7 +199,7 @@ pub(crate) async fn update_table_z_values_internal(
         let offset = i * element_size;
         constant
             .data_type
-            .write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
+            .write_to_bytes(&mut raw_data, offset, raw_val, endianness);
     }
 
     // Write to TuneCache if available
@@ -197,15 +208,10 @@ pub(crate) async fn update_table_z_values_internal(
             // Also update TuneFile in memory
             let mut tune_guard = state.current_tune.lock().await;
             if let Some(tune) = tune_guard.as_mut() {
-                let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                    vec![
-                        0u8;
-                        def.page_sizes
-                            .get(constant.page as usize)
-                            .copied()
-                            .unwrap_or(256) as usize
-                    ]
-                });
+                let page_data = tune
+                    .pages
+                    .entry(constant.page)
+                    .or_insert_with(|| vec![0u8; default_page_bytes]);
                 let start = constant.offset as usize;
                 let end = start + raw_data.len();
                 if end <= page_data.len() {
@@ -238,16 +244,28 @@ pub(crate) async fn update_constant_array_internal(
     constant_name: &str,
     values: Vec<f64>,
 ) -> Result<(), String> {
+    // Snapshot only what we need from the definition, then drop the lock
+    // before doing any ECU I/O below — holding it across a blocking
+    // conn.write_memory() call starves every other command that needs the
+    // definition (e.g. load_tune, table/constant reads).
+    let (constant, endianness, default_page_bytes) = {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+        let constant = def
+            .constants
+            .get(constant_name)
+            .ok_or_else(|| format!("Constant {} not found", constant_name))?
+            .clone();
+        let default_page_bytes = def
+            .page_sizes
+            .get(constant.page as usize)
+            .copied()
+            .unwrap_or(256) as usize;
+        (constant, def.endianness, default_page_bytes)
+    };
+
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
     let mut cache_guard = state.tune_cache.lock().await;
-
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-
-    let constant = def
-        .constants
-        .get(constant_name)
-        .ok_or_else(|| format!("Constant {} not found", constant_name))?;
 
     if values.len() != constant.shape.element_count() {
         return Err(format!(
@@ -266,22 +284,17 @@ pub(crate) async fn update_constant_array_internal(
         let offset = i * element_size;
         constant
             .data_type
-            .write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
+            .write_to_bytes(&mut raw_data, offset, raw_val, endianness);
     }
 
     if let Some(cache) = cache_guard.as_mut() {
         if cache.write_bytes(constant.page, constant.offset, &raw_data) {
             let mut tune_guard = state.current_tune.lock().await;
             if let Some(tune) = tune_guard.as_mut() {
-                let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                    vec![
-                        0u8;
-                        def.page_sizes
-                            .get(constant.page as usize)
-                            .copied()
-                            .unwrap_or(256) as usize
-                    ]
-                });
+                let page_data = tune
+                    .pages
+                    .entry(constant.page)
+                    .or_insert_with(|| vec![0u8; default_page_bytes]);
 
                 let start = constant.offset as usize;
                 let end = start + raw_data.len();
