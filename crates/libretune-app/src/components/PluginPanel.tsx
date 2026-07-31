@@ -18,11 +18,15 @@ interface PluginPanelProps {
   isConnected: boolean;
 }
 
+const ALL_PERMISSIONS = ["ReadTables", "WriteConstants", "SubscribeChannels", "ExecuteActions"];
+
 export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedPlugin, setSelectedPlugin] = useState<string | null>(null);
   const [showPermissions, setShowPermissions] = useState(false);
+  const [pendingPlugin, setPendingPlugin] = useState<{ path: string; name: string } | null>(null);
+  const [consentedPermissions, setConsentedPermissions] = useState<Set<string>>(new Set());
 
   // Load list of plugins
   const loadPlugins = useCallback(async () => {
@@ -42,7 +46,9 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
     loadPlugins();
   }, [loadPlugins]);
 
-  // Load plugin from file
+  // Pick a plugin file, then open the permission-consent dialog instead of
+  // loading immediately — permissions must be explicitly approved here, not
+  // auto-granted from a self-declared manifest.
   const handleLoadPlugin = useCallback(async () => {
     try {
       const files = await open({
@@ -53,22 +59,59 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
       });
 
       if (files && !Array.isArray(files)) {
-        // Create a default manifest for the plugin based on filename
         const filename = (files as string).split("/").pop()?.split("\\").pop()?.replace(".wasm", "") || "unknown";
-        const manifest = JSON.stringify({
-          name: filename,
-          version: "1.0.0",
-          description: `Plugin loaded from ${filename}.wasm`,
-          author: "Unknown",
-          permissions: ["ReadTables"],
-        });
-        await invoke("load_wasm_plugin", { path: files, manifestJson: manifest });
-        await loadPlugins();
+        setConsentedPermissions(new Set());
+        setPendingPlugin({ path: files as string, name: filename });
       }
     } catch (error) {
       console.error("Failed to load plugin:", error);
     }
-  }, [loadPlugins]);
+  }, []);
+
+  const togglePendingPermission = useCallback((perm: string) => {
+    setConsentedPermissions((prev) => {
+      const next = new Set(prev);
+      if (next.has(perm)) {
+        next.delete(perm);
+      } else {
+        next.add(perm);
+      }
+      return next;
+    });
+  }, []);
+
+  const cancelPendingPlugin = useCallback(() => {
+    setPendingPlugin(null);
+    setConsentedPermissions(new Set());
+  }, []);
+
+  // User has reviewed the requested permissions and approved a subset (or
+  // all, or none) of them — only the checked ones are ever granted, on the
+  // Rust side, regardless of what the manifest claims to want.
+  const confirmPendingPlugin = useCallback(async () => {
+    if (!pendingPlugin) return;
+    try {
+      const approved = Array.from(consentedPermissions);
+      const manifest = JSON.stringify({
+        name: pendingPlugin.name,
+        version: "1.0.0",
+        description: `Plugin loaded from ${pendingPlugin.name}.wasm`,
+        author: "Unknown",
+        permissions: approved,
+      });
+      await invoke("load_wasm_plugin", {
+        path: pendingPlugin.path,
+        manifestJson: manifest,
+        approvedPermissions: approved,
+      });
+      await loadPlugins();
+    } catch (error) {
+      console.error("Failed to load plugin:", error);
+    } finally {
+      setPendingPlugin(null);
+      setConsentedPermissions(new Set());
+    }
+  }, [pendingPlugin, consentedPermissions, loadPlugins]);
 
   // Unload plugin
   const handleUnloadPlugin = useCallback(
@@ -272,6 +315,43 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
           </div>
         )}
       </div>
+
+      {pendingPlugin && (
+        <div className="plugin-consent-overlay" role="dialog" aria-modal="true">
+          <div className="plugin-consent-dialog">
+            <h3>Grant permissions to "{pendingPlugin.name}"?</h3>
+            <p className="plugin-consent-warning">
+              This plugin runs sandboxed WebAssembly code. Check only the capabilities you want
+              to allow — anything left unchecked will be denied, regardless of what the plugin
+              requests.
+            </p>
+            <div className="plugin-consent-list">
+              {ALL_PERMISSIONS.map((perm) => {
+                const { label, Icon } = getPermissionDisplay(perm);
+                return (
+                  <label key={perm} className="plugin-consent-item">
+                    <input
+                      type="checkbox"
+                      checked={consentedPermissions.has(perm)}
+                      onChange={() => togglePendingPermission(perm)}
+                    />
+                    {Icon && <Icon size={14} aria-hidden />}
+                    <span>{label}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="plugin-actions">
+              <button className="plugin-button plugin-button-secondary" onClick={cancelPendingPlugin}>
+                Cancel
+              </button>
+              <button className="plugin-button plugin-button-primary" onClick={confirmPendingPlugin}>
+                Load Plugin
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

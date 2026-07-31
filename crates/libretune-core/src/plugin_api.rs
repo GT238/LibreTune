@@ -24,15 +24,6 @@ impl PluginApiContext {
             plugin_manager: Mutex::new(plugin_manager),
         }
     }
-
-    /// Check if plugin has permission (non-panicking).
-    fn check_permission(&self, plugin_name: &str, perm: Permission) -> bool {
-        if let Ok(manager) = self.plugin_manager.lock() {
-            manager.check_permission(plugin_name, perm)
-        } else {
-            false
-        }
-    }
 }
 
 /// Plugin API response for any function call.
@@ -164,21 +155,19 @@ impl PluginLogMessage {
 /// Requires `ReadTables` permission.
 ///
 /// # Arguments
-/// * `plugin_name` - Name of calling plugin
+/// * `granted` - Permissions granted to the calling plugin instance
 /// * `table_name` - Name of table to read
 /// * `row`, `col` - Cell coordinates (-1 for header)
 ///
 /// # Returns
 /// ApiResponse with value as bytes or error
 pub fn api_get_table_data(
-    _ctx: &PluginApiContext,
-    plugin_name: &str,
+    granted: &[Permission],
     _table_name: &str,
     _row: i32,
     _col: i32,
 ) -> ApiResponse {
-    // Permission check
-    if !_ctx.check_permission(plugin_name, Permission::ReadTables) {
+    if !granted.contains(&Permission::ReadTables) {
         return ApiResponse::permission_denied("ReadTables");
     }
 
@@ -193,18 +182,13 @@ pub fn api_get_table_data(
 /// Requires `ReadTables` permission (constants are table-like data).
 ///
 /// # Arguments
-/// * `plugin_name` - Name of calling plugin
+/// * `granted` - Permissions granted to the calling plugin instance
 /// * `constant_name` - Name of constant
 ///
 /// # Returns
 /// ApiResponse with value as bytes or error
-pub fn api_get_constant(
-    _ctx: &PluginApiContext,
-    plugin_name: &str,
-    _constant_name: &str,
-) -> ApiResponse {
-    // Permission check
-    if !_ctx.check_permission(plugin_name, Permission::ReadTables) {
+pub fn api_get_constant(granted: &[Permission], _constant_name: &str) -> ApiResponse {
+    if !granted.contains(&Permission::ReadTables) {
         return ApiResponse::permission_denied("ReadTables");
     }
 
@@ -218,20 +202,18 @@ pub fn api_get_constant(
 /// Requires `WriteConstants` permission.
 ///
 /// # Arguments
-/// * `plugin_name` - Name of calling plugin
+/// * `granted` - Permissions granted to the calling plugin instance
 /// * `constant_name` - Name of constant
 /// * `value_bytes` - Raw bytes to write
 ///
 /// # Returns
 /// ApiResponse with success or error
 pub fn api_set_constant(
-    _ctx: &PluginApiContext,
-    plugin_name: &str,
+    granted: &[Permission],
     _constant_name: &str,
     _value_bytes: &[u8],
 ) -> ApiResponse {
-    // Permission check
-    if !_ctx.check_permission(plugin_name, Permission::WriteConstants) {
+    if !granted.contains(&Permission::WriteConstants) {
         return ApiResponse::permission_denied("WriteConstants");
     }
 
@@ -245,18 +227,13 @@ pub fn api_set_constant(
 /// Requires `SubscribeChannels` permission.
 ///
 /// # Arguments
-/// * `plugin_name` - Name of calling plugin
+/// * `granted` - Permissions granted to the calling plugin instance
 /// * `channel_name` - Name of channel (e.g., "RPM", "AFR")
 ///
 /// # Returns
 /// ApiResponse with channel ID or error
-pub fn api_subscribe_channel(
-    _ctx: &PluginApiContext,
-    plugin_name: &str,
-    _channel_name: &str,
-) -> ApiResponse {
-    // Permission check
-    if !_ctx.check_permission(plugin_name, Permission::SubscribeChannels) {
+pub fn api_subscribe_channel(granted: &[Permission], _channel_name: &str) -> ApiResponse {
+    if !granted.contains(&Permission::SubscribeChannels) {
         return ApiResponse::permission_denied("SubscribeChannels");
     }
 
@@ -271,23 +248,38 @@ pub fn api_subscribe_channel(
 /// Requires `SubscribeChannels` permission.
 ///
 /// # Arguments
-/// * `plugin_name` - Name of calling plugin
+/// * `granted` - Permissions granted to the calling plugin instance
 /// * `channel_id` - ID from subscribe call
 ///
 /// # Returns
 /// ApiResponse with current value or error
-pub fn api_get_channel_value(
-    _ctx: &PluginApiContext,
-    plugin_name: &str,
-    _channel_id: u32,
-) -> ApiResponse {
-    // Permission check
-    if !_ctx.check_permission(plugin_name, Permission::SubscribeChannels) {
+pub fn api_get_channel_value(granted: &[Permission], _channel_id: u32) -> ApiResponse {
+    if !granted.contains(&Permission::SubscribeChannels) {
         return ApiResponse::permission_denied("SubscribeChannels");
     }
 
     // Implementation would fetch current value
     ApiResponse::ok(vec![0u8; 4]) // f32 value as bytes
+}
+
+/// Host function: Execute action sequence.
+///
+/// # Permissions
+/// Requires `ExecuteActions` permission.
+///
+/// # Arguments
+/// * `granted` - Permissions granted to the calling plugin instance
+/// * `action_json` - JSON-encoded action data
+///
+/// # Returns
+/// ApiResponse with execution result or error
+pub fn api_execute_action(granted: &[Permission], _action_json: &str) -> ApiResponse {
+    if !granted.contains(&Permission::ExecuteActions) {
+        return ApiResponse::permission_denied("ExecuteActions");
+    }
+
+    // Implementation would parse JSON and execute action
+    ApiResponse::ok_empty()
 }
 
 /// Host function: Log a message from plugin.
@@ -299,7 +291,6 @@ pub fn api_get_channel_value(
 /// * `level` - Log level (0=Debug, 1=Info, 2=Warn, 3=Error)
 /// * `message` - Message text
 pub fn api_log_message(
-    _ctx: &PluginApiContext,
     plugin_name: impl Into<String>,
     level: i32,
     message: impl Into<String>,
@@ -310,31 +301,6 @@ pub fn api_log_message(
     // In real implementation, would write to log file or channel
     eprintln!("{}", log_msg.format_display());
 
-    ApiResponse::ok_empty()
-}
-
-/// Host function: Execute action sequence.
-///
-/// # Permissions
-/// Requires `ExecuteActions` permission.
-///
-/// # Arguments
-/// * `plugin_name` - Name of calling plugin
-/// * `action_json` - JSON-encoded action data
-///
-/// # Returns
-/// ApiResponse with execution result or error
-pub fn api_execute_action(
-    _ctx: &PluginApiContext,
-    plugin_name: &str,
-    _action_json: &str,
-) -> ApiResponse {
-    // Permission check
-    if !_ctx.check_permission(plugin_name, Permission::ExecuteActions) {
-        return ApiResponse::permission_denied("ExecuteActions");
-    }
-
-    // Implementation would parse JSON and execute action
     ApiResponse::ok_empty()
 }
 
@@ -461,51 +427,88 @@ mod tests {
 
     #[test]
     fn test_api_get_table_data_no_permission() {
-        let ctx = create_test_context();
-        let resp = api_get_table_data(&ctx, "unknown_plugin", "veTable1", 0, 0);
+        let resp = api_get_table_data(&[], "veTable1", 0, 0);
         assert!(!resp.success);
         assert!(resp.error.contains("Permission denied"));
     }
 
     #[test]
+    fn test_api_get_table_data_with_permission() {
+        let resp = api_get_table_data(&[Permission::ReadTables], "veTable1", 0, 0);
+        assert!(resp.success);
+        assert_eq!(resp.data.len(), 4);
+    }
+
+    #[test]
     fn test_api_get_constant_no_permission() {
-        let ctx = create_test_context();
-        let resp = api_get_constant(&ctx, "unknown_plugin", "rpm");
+        let resp = api_get_constant(&[], "rpm");
         assert!(!resp.success);
     }
 
     #[test]
+    fn test_api_get_constant_with_permission() {
+        let resp = api_get_constant(&[Permission::ReadTables], "rpm");
+        assert!(resp.success);
+    }
+
+    #[test]
     fn test_api_set_constant_no_permission() {
-        let ctx = create_test_context();
-        let resp = api_set_constant(&ctx, "unknown_plugin", "rpm", &[0, 0, 0, 0]);
+        let resp = api_set_constant(&[], "rpm", &[0, 0, 0, 0]);
+        assert!(!resp.success);
+    }
+
+    #[test]
+    fn test_api_set_constant_with_permission() {
+        let resp = api_set_constant(&[Permission::WriteConstants], "rpm", &[0, 0, 0, 0]);
+        assert!(resp.success);
+    }
+
+    #[test]
+    fn test_api_set_constant_read_permission_insufficient() {
+        // ReadTables alone must not satisfy a WriteConstants check.
+        let resp = api_set_constant(&[Permission::ReadTables], "rpm", &[0, 0, 0, 0]);
         assert!(!resp.success);
     }
 
     #[test]
     fn test_api_subscribe_channel_no_permission() {
-        let ctx = create_test_context();
-        let resp = api_subscribe_channel(&ctx, "unknown_plugin", "RPM");
+        let resp = api_subscribe_channel(&[], "RPM");
         assert!(!resp.success);
+    }
+
+    #[test]
+    fn test_api_subscribe_channel_with_permission() {
+        let resp = api_subscribe_channel(&[Permission::SubscribeChannels], "RPM");
+        assert!(resp.success);
     }
 
     #[test]
     fn test_api_get_channel_value_no_permission() {
-        let ctx = create_test_context();
-        let resp = api_get_channel_value(&ctx, "unknown_plugin", 0);
+        let resp = api_get_channel_value(&[], 0);
         assert!(!resp.success);
+    }
+
+    #[test]
+    fn test_api_get_channel_value_with_permission() {
+        let resp = api_get_channel_value(&[Permission::SubscribeChannels], 0);
+        assert!(resp.success);
     }
 
     #[test]
     fn test_api_execute_action_no_permission() {
-        let ctx = create_test_context();
-        let resp = api_execute_action(&ctx, "unknown_plugin", "{}");
+        let resp = api_execute_action(&[], "{}");
         assert!(!resp.success);
     }
 
     #[test]
+    fn test_api_execute_action_with_permission() {
+        let resp = api_execute_action(&[Permission::ExecuteActions], "{}");
+        assert!(resp.success);
+    }
+
+    #[test]
     fn test_api_log_message_always_allowed() {
-        let ctx = create_test_context();
-        let resp = api_log_message(&ctx, "test_plugin", 1, "test log");
+        let resp = api_log_message("test_plugin", 1, "test log");
         assert!(resp.success);
     }
 

@@ -5,10 +5,27 @@
 
 use crate::state::AppState;
 use libretune_core::plugin_system::{
-    PluginConfig as WasmPluginConfig, PluginManager as WasmPluginManager,
-    PluginManifest as WasmPluginManifest,
+    Permission as WasmPermission, PluginConfig as WasmPluginConfig,
+    PluginManager as WasmPluginManager, PluginManifest as WasmPluginManifest,
 };
 use serde::{Deserialize, Serialize};
+
+/// Parse the frontend's string permission names (e.g. from consent-dialog
+/// checkboxes) into typed [`WasmPermission`]s, ignoring anything unrecognized
+/// rather than failing the whole load — an unrecognized name just can't be
+/// granted, which is the safe default.
+fn parse_permissions(names: &[String]) -> Vec<WasmPermission> {
+    names
+        .iter()
+        .filter_map(|n| match n.as_str() {
+            "ReadTables" => Some(WasmPermission::ReadTables),
+            "WriteConstants" => Some(WasmPermission::WriteConstants),
+            "SubscribeChannels" => Some(WasmPermission::SubscribeChannels),
+            "ExecuteActions" => Some(WasmPermission::ExecuteActions),
+            _ => None,
+        })
+        .collect()
+}
 
 /// Serializable plugin info returned to the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,13 +52,20 @@ fn new_plugin_manager() -> WasmPluginManager {
 ///
 /// # Arguments
 /// * `path` - Path to the .wasm plugin file
-/// * `manifest_json` - JSON string with plugin manifest
+/// * `manifest_json` - JSON string with plugin manifest (the permissions the
+///   plugin is *requesting*)
+/// * `approved_permissions` - The permission names the user actually
+///   approved (e.g. via a consent dialog listing the manifest's request).
+///   Only permissions present in both this list and the manifest are
+///   granted — a manifest can never self-grant a permission the user didn't
+///   check.
 ///
 /// Returns: Plugin name on success
 #[tauri::command]
 pub async fn load_wasm_plugin(
     path: String,
     manifest_json: String,
+    approved_permissions: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     let manifest: WasmPluginManifest = serde_json::from_str(&manifest_json)
@@ -52,10 +76,12 @@ pub async fn load_wasm_plugin(
         return Err(format!("WASM file not found: {}", path));
     }
 
+    let approved = parse_permissions(&approved_permissions);
+
     let mut pm_guard = state.wasm_plugin_manager.lock().await;
     let pm = pm_guard.get_or_insert_with(new_plugin_manager);
 
-    let name = pm.load_plugin(manifest, wasm_path)?;
+    let name = pm.load_plugin(manifest, wasm_path, &approved)?;
     Ok(name)
 }
 
@@ -90,7 +116,11 @@ pub async fn list_wasm_plugins(
                                 m.version.clone(),
                                 m.description.clone(),
                                 m.author.clone(),
-                                m.permissions.iter().map(|p| format!("{:?}", p)).collect(),
+                                plugin
+                                    .granted_permissions()
+                                    .iter()
+                                    .map(|p| format!("{:?}", p))
+                                    .collect(),
                             )
                         } else {
                             (String::new(), String::new(), String::new(), vec![])
@@ -145,8 +175,8 @@ pub async fn get_wasm_plugin_info(
         description: manifest.description.clone(),
         author: manifest.author.clone(),
         state: format!("{:?}", stats.state),
-        permissions: manifest
-            .permissions
+        permissions: plugin
+            .granted_permissions()
             .iter()
             .map(|p| format!("{:?}", p))
             .collect(),
