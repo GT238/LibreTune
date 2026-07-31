@@ -13,6 +13,37 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-07-31 — Chat history, stop button, UI state persistence
+
+Enhancements to the AI assistant and overall workspace UX.
+
+#### Added
+- **Chat history** — assistant conversations now persist **per project** as
+  JSON files under `projectCfg/ai_chats/`. The panel header gains a **chat
+  switcher** (list button) and a **New chat** button (plus icon). The most
+  recent chat auto-opens on launch. Chats auto-save on every message.
+- **Stop button** — while the assistant is thinking, the Send button becomes
+  a red Stop button that cancels the in-flight request. Backend: the turn is
+  spawned as a tokio task whose `JoinHandle` is stored in `AppState.agent_task`;
+  the new `agent_stop` command aborts it (mirrors the realtime-stream pattern).
+  Cancellation surfaces as `_(stopped)_` in the transcript, not an error.
+- **UI state persistence** — on launch the app restores sidebar visibility,
+  sidebar folder expansion, AI panel visibility, and the selected dashboard.
+  New settings fields (`sidebar_visible`, `agent_panel_visible`,
+  `selected_dashboard`, `open_tabs`, `sidebar_expanded_ids`) with `update_setting`
+  arms. Persistence is gated on a restore flag so the initial default values
+  don't overwrite saved ones before the async restore completes.
+
+#### Fixed
+- **Assistant transcript reset to blank** — a stale-closure bug in
+  `ChatPanel.send()` caused the transcript to reset after the first reply.
+  The function now snapshots the transcript at the start of the turn and
+  builds the updated transcript from that snapshot.
+- **Assistant showed "disabled" while status loaded** — the panel flashed the
+  "disabled" message before the status poll completed. Now shows "Loading…"
+  until the status is fetched, and a specific message when enabled-but-
+  unconfigured (missing risk ack or model).
+
 ### 2026-07-31 — AI Assistant (bring-your-own-LLM) + UX fixes
 
 Adds a bring-your-own-LLM assistant that acts as a co-pilot for tuning and ECU

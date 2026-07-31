@@ -102,6 +102,9 @@ pub async fn update_setting(
         "agent_panel_visible" => {
             settings.agent_panel_visible = value.parse().map_err(|_| "Invalid boolean value")?
         }
+        "sidebar_expanded_ids" => {
+            settings.sidebar_expanded_ids = if value.is_empty() { None } else { Some(value) }
+        }
         "selected_dashboard" => {
             settings.selected_dashboard = if value.is_empty() { None } else { Some(value) }
         }

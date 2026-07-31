@@ -39,6 +39,9 @@ pub(crate) struct Settings {
     /// Whether the AI assistant side panel is visible.
     #[serde(default)]
     pub(crate) agent_panel_visible: bool,
+    /// Expanded sidebar folder IDs (JSON array of strings) for session restore.
+    #[serde(default)]
+    pub(crate) sidebar_expanded_ids: Option<String>,
     /// The selected dashboard file name (e.g. "Telemetry Live.ltdash.xml").
     #[serde(default)]
     pub(crate) selected_dashboard: Option<String>,

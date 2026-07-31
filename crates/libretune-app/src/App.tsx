@@ -202,6 +202,12 @@ function AppContent() {
   // Sidebar state
   const [sidebarVisible, setSidebarVisible] = useState(true);
 
+  // Gate: don't persist UI state until after the initial restore from
+  // settings has completed. Without this, the persist effects fire on first
+  // render with the default values (sidebar=true, agent=false) and overwrite
+  // the saved values before the async restore runs.
+  const uiStateRestored = useRef(false);
+
   // Dialog state
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
@@ -307,10 +313,14 @@ function AppContent() {
   const [isTauri, setIsTauri] = useState(true);
 
   // Persist UI layout state to settings so it's restored on next launch.
+  // Gated on uiStateRestored so the initial defaults don't overwrite saved
+  // values before the async restore completes.
   useEffect(() => {
+    if (!uiStateRestored.current) return;
     void invoke('update_setting', { key: 'sidebar_visible', value: String(sidebarVisible) }).catch(() => {});
   }, [sidebarVisible]);
   useEffect(() => {
+    if (!uiStateRestored.current) return;
     void invoke('update_setting', { key: 'agent_panel_visible', value: String(agentPanelVisible) }).catch(() => {});
   }, [agentPanelVisible]);
 
@@ -373,6 +383,8 @@ function AppContent() {
         // Restore UI layout state.
         if (settings.sidebar_visible !== undefined) setSidebarVisible(!!settings.sidebar_visible);
         if (settings.agent_panel_visible !== undefined) setAgentPanelVisible(!!settings.agent_panel_visible);
+        // Mark restore complete so the persist effects can start saving.
+        uiStateRestored.current = true;
         // Honor saved UI language preference (mirror to localStorage so the
         // i18n LanguageDetector picks it up on next app start, and switch live now).
         if (settings.language && typeof settings.language === 'string') {
@@ -392,6 +404,9 @@ function AppContent() {
         }
       } catch (e) {
         console.warn("Failed to load settings:", e);
+        // Even if settings load failed, let persistence start so future
+        // changes are saved.
+        uiStateRestored.current = true;
       }
       
       // Load custom hotkey bindings

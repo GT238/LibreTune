@@ -84,6 +84,39 @@ existing tools.
 - **Pop-out** — click the external-link icon in the panel header to open the
   assistant in its own window. Use that window's **Dock** button to bring it
   back to the docked panel.
+- **Stop** — while the assistant is thinking, the **Send** button becomes a
+  red **Stop** button. Click it to cancel the in-flight request (useful if a
+  provider is slow or stuck). A cancelled request shows `_(stopped)_` in the
+  transcript rather than an error.
+
+### Chat History
+
+The assistant persists your conversations **per project**, so you can close
+the app and come back to pick up where you left off.
+
+- **Auto-save** — every message is saved automatically.
+- **Chat switcher** — click the **list icon** in the panel header to see all
+  past chats for the current project, most-recent first. Click one to switch
+  to it; click the × to delete it.
+- **New chat** — click the **plus icon** to start a fresh conversation.
+- **Auto-open** — on launch, the most recent chat for the current project
+  loads automatically.
+
+Chats are stored as JSON files under `projectCfg/ai_chats/` inside the project
+folder, so they travel with the project if you copy it.
+
+## UI State Persistence
+
+LibreTune remembers your workspace layout across restarts. When you close and
+reopen the app (or refresh the window), it restores:
+
+- **Sidebar visibility** — whether the left sidebar is shown or hidden.
+- **Sidebar expansion** — which folders are expanded/collapsed.
+- **AI Assistant panel** — whether the right-hand chat panel is open.
+- **Selected dashboard** — which dashboard was last loaded.
+- **Window size and position** — handled by the window-state plugin.
+
+This means the app opens "exactly as you left it" without any extra setup.
 
 ## Providers
 
