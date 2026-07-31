@@ -101,3 +101,29 @@ export interface AgentStatus {
   capability_tier: string;
   configured: boolean;
 }
+
+// --- Chat history persistence ---
+
+/** One chat message stored in a chat history file. */
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** One persisted chat conversation. */
+export interface ChatHistory {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** Summary entry for the chat list (no message bodies). */
+export interface ChatSummary {
+  id: string;
+  title: string;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}

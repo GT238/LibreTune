@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useMemo, MouseEvent, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { SidebarNode } from './TunerLayout';
 import { resolveNodeIcon } from '../../utils/nodeIcons';
 import './Sidebar.css';
@@ -106,6 +107,39 @@ export function Sidebar({ items, width, onResize, onItemSelect, searchIndex, pro
   const searchInputRef = useRef<HTMLInputElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
+  // Gate: don't persist until the initial restore from settings is done.
+  const expandedRestored = useRef(false);
+  const saveExpandedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Restore expanded folder IDs from settings on mount.
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await invoke<{ sidebar_expanded_ids?: string }>('get_settings');
+        if (settings.sidebar_expanded_ids) {
+          const ids = JSON.parse(settings.sidebar_expanded_ids) as string[];
+          setExpandedIds(new Set(ids));
+        }
+      } catch {
+        // non-fatal — start with empty set
+      } finally {
+        expandedRestored.current = true;
+      }
+    })();
+  }, []);
+
+  // Persist expanded folder IDs to settings (debounced).
+  useEffect(() => {
+    if (!expandedRestored.current) return;
+    if (saveExpandedTimer.current) clearTimeout(saveExpandedTimer.current);
+    saveExpandedTimer.current = setTimeout(() => {
+      void invoke('update_setting', {
+        key: 'sidebar_expanded_ids',
+        value: JSON.stringify([...expandedIds]),
+      }).catch(() => {});
+    }, 500);
+    return () => { if (saveExpandedTimer.current) clearTimeout(saveExpandedTimer.current); };
+  }, [expandedIds]);
 
   // Filter tree based on search query (with deep search via searchIndex)
   const filteredItems = useMemo(() => {

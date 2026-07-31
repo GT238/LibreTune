@@ -41,7 +41,10 @@ pub(crate) use commands::util_helpers::{
 use commands::adaptive_timing::{
     disable_adaptive_timing, enable_adaptive_timing, get_adaptive_timing_stats,
 };
-use commands::agent::{agent_apply_proposals, agent_send_message, agent_status};
+use commands::agent::{
+    agent_apply_proposals, agent_delete_chat, agent_list_chats, agent_load_chat,
+    agent_save_chat, agent_send_message, agent_status, agent_stop,
+};
 use commands::annotations::{
     delete_annotation, get_all_annotations, get_annotation, get_table_annotations, set_annotation,
 };
@@ -210,6 +213,7 @@ pub fn run() {
             cached_output_channels: Mutex::new(None),
             math_channels: Mutex::new(Vec::new()),
             stream_stats: Mutex::new(StreamStats::default()),
+            agent_task: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,
@@ -410,10 +414,11 @@ pub fn run() {
             agent_status,
             agent_send_message,
             agent_apply_proposals,
-            // AI assistant
-            agent_status,
-            agent_send_message,
-            agent_apply_proposals,
+            agent_stop,
+            agent_list_chats,
+            agent_load_chat,
+            agent_save_chat,
+            agent_delete_chat,
             // Demo mode commands
             set_demo_mode,
             get_demo_mode,

@@ -96,6 +96,72 @@
   max-height: 32px;
 }
 
+/* Chat history list (toggled by the list button in the header). */
+.agent-chat-list {
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  flex-shrink: 0;
+}
+
+.agent-chat-list-empty {
+  padding: 8px;
+  font-size: 12px;
+  opacity: 0.6;
+  text-align: center;
+}
+
+.agent-chat-list-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.agent-chat-list-item.active {
+  background: rgba(128, 160, 255, 0.15);
+}
+
+.agent-chat-list-item-title {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 4px;
+}
+
+.agent-chat-list-item-title:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.agent-chat-list-item-del {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.agent-chat-list-item-del:hover {
+  opacity: 1;
+  background: rgba(255, 80, 80, 0.2);
+}
+
 .agent-panel-queue-toggle {
   display: flex;
   align-items: center;
