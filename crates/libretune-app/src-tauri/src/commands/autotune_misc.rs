@@ -147,22 +147,25 @@ pub async fn send_autotune_recommendations(
         return Err("No recommendations to send".to_string());
     }
 
-    // Ensure connection and definition exist
+    // Snapshot what we need from the definition, then drop the lock before
+    // doing any ECU I/O below — holding it across the read/write round-trip
+    // starves every other command that needs the definition (e.g. load_tune,
+    // table views) for the duration of both serial transactions.
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let (constant, endianness, x_size, y_size) = {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+        let table = def
+            .get_table_by_name_or_map(&table_name)
+            .ok_or_else(|| format!("Table {} not found", table_name))?;
+        let constant = def
+            .constants
+            .get(&table.map)
+            .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?
+            .clone();
+        (constant, def.endianness, table.x_size, table.y_size)
+    };
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
-
-    // Find target table
-    let table = def
-        .get_table_by_name_or_map(&table_name)
-        .ok_or_else(|| format!("Table {} not found", table_name))?;
-
-    // Read current table map values
-    let constant = def
-        .constants
-        .get(&table.map)
-        .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
 
     let element_count = constant.shape.element_count();
     let element_size = constant.data_type.size_bytes();
@@ -187,17 +190,13 @@ pub async fn send_autotune_recommendations(
         let offset = i * element_size;
         if let Some(raw_val) = constant
             .data_type
-            .read_from_bytes(&raw_data, offset, def.endianness)
+            .read_from_bytes(&raw_data, offset, endianness)
         {
             values.push(constant.raw_to_display(raw_val));
         } else {
             values.push(0.0);
         }
     }
-
-    // Determine table dimensions
-    let x_size = table.x_size;
-    let y_size = table.y_size;
 
     // Apply recommendations
     for r in recs.iter() {
@@ -219,7 +218,7 @@ pub async fn send_autotune_recommendations(
         let offset = i * element_size;
         constant
             .data_type
-            .write_to_bytes(&mut raw_out, offset, raw_val, def.endianness);
+            .write_to_bytes(&mut raw_out, offset, raw_val, endianness);
     }
 
     // Write back to ECU
@@ -249,26 +248,26 @@ pub async fn burn_autotune_recommendations(
     state: tauri::State<'_, AppState>,
     table_name: String,
 ) -> Result<(), String> {
-    // Ensure connection and definition exist
+    // Snapshot the target page and drop the definition lock before the
+    // blocking burn call below — a flash burn (erase + program cycle) is
+    // typically slower than a plain read/write, so holding the lock across
+    // it starves other commands for longer than usual.
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let page = {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+        let table = def
+            .get_table_by_name_or_map(&table_name)
+            .ok_or_else(|| format!("Table {} not found", table_name))?;
+        let constant = def
+            .constants
+            .get(&table.map)
+            .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
+        constant.page
+    };
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
 
-    // Find target table constant page
-    let table = def
-        .get_table_by_name_or_map(&table_name)
-        .ok_or_else(|| format!("Table {} not found", table_name))?;
-
-    let constant = def
-        .constants
-        .get(&table.map)
-        .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
-
-    let params = libretune_core::protocol::commands::BurnParams {
-        can_id: 0,
-        page: constant.page,
-    };
+    let params = libretune_core::protocol::commands::BurnParams { can_id: 0, page };
 
     conn.burn(params).map_err(|e| e.to_string())?;
 
