@@ -4,6 +4,66 @@ use crate::AppState;
 use serde::Serialize;
 use tauri::Manager;
 
+/// Refuses to apply/burn recommendations computed against a different ECU
+/// definition than the one currently loaded (e.g. reconnected to a
+/// different ECU/INI without stopping AutoTune first). Without this check a
+/// same-named table in the new definition would silently receive
+/// corrections computed against the old one's layout/units.
+///
+/// `session_signature` is `None` if no AutoTune session was ever started
+/// (already handled elsewhere by "no recommendations to send") or, in
+/// practice, always `Some` once a session exists — `None` is treated as
+/// "nothing to check against" rather than a failure.
+fn check_definition_matches(
+    session_signature: &Option<String>,
+    current_signature: &str,
+    action: &str,
+) -> Result<(), String> {
+    if let Some(started_against) = session_signature {
+        if started_against != current_signature {
+            return Err(format!(
+                "AutoTune session was started against a different ECU definition ('{}' vs. current '{}') — stop and restart AutoTune before {}",
+                started_against, current_signature, action
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matching_signature_passes() {
+        assert!(check_definition_matches(
+            &Some("speeduino 202501".to_string()),
+            "speeduino 202501",
+            "applying recommendations"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn mismatched_signature_fails_with_both_signatures_named() {
+        let err = check_definition_matches(
+            &Some("speeduino 202501".to_string()),
+            "speeduino 202402",
+            "applying recommendations",
+        )
+        .unwrap_err();
+        assert!(err.contains("speeduino 202501"));
+        assert!(err.contains("speeduino 202402"));
+    }
+
+    #[test]
+    fn no_recorded_session_signature_passes() {
+        // No session signature recorded (e.g. legacy/edge-case config) —
+        // nothing to compare against, so don't block the action.
+        assert!(check_definition_matches(&None, "speeduino 202501", "burning").is_ok());
+    }
+}
+
 /// Stops AutoTune data collection.
 ///
 /// Clears the AutoTune config and stops processing realtime data.
@@ -126,12 +186,14 @@ pub async fn send_autotune_recommendations(
     table_name: String,
 ) -> Result<(), String> {
     // Collect recommendations
-    let secondary_name = state
-        .autotune_config
-        .lock()
-        .await
-        .as_ref()
-        .and_then(|config| config.secondary_table_name.clone());
+    let (secondary_name, session_signature) = {
+        let config_guard = state.autotune_config.lock().await;
+        let config = config_guard.as_ref();
+        (
+            config.and_then(|c| c.secondary_table_name.clone()),
+            config.map(|c| c.definition_signature.clone()),
+        )
+    };
 
     let recs = if matches!(
         (Some(table_name.as_str()), secondary_name.as_deref()),
@@ -152,7 +214,7 @@ pub async fn send_autotune_recommendations(
     // starves every other command that needs the definition (e.g. load_tune,
     // table views) for the duration of both serial transactions.
     let mut conn_guard = state.connection.lock().await;
-    let (constant, endianness, x_size, y_size) = {
+    let (constant, endianness, x_size, y_size, current_signature) = {
         let def_guard = state.definition.lock().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
         let table = def
@@ -163,9 +225,21 @@ pub async fn send_autotune_recommendations(
             .get(&table.map)
             .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?
             .clone();
-        (constant, def.endianness, table.x_size, table.y_size)
+        (
+            constant,
+            def.endianness,
+            table.x_size,
+            table.y_size,
+            def.signature.clone(),
+        )
     };
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+
+    check_definition_matches(
+        &session_signature,
+        &current_signature,
+        "applying recommendations",
+    )?;
 
     let element_count = constant.shape.element_count();
     let element_size = constant.data_type.size_bytes();
@@ -248,12 +322,20 @@ pub async fn burn_autotune_recommendations(
     state: tauri::State<'_, AppState>,
     table_name: String,
 ) -> Result<(), String> {
-    // Snapshot the target page and drop the definition lock before the
-    // blocking burn call below — a flash burn (erase + program cycle) is
-    // typically slower than a plain read/write, so holding the lock across
-    // it starves other commands for longer than usual.
+    let session_signature = state
+        .autotune_config
+        .lock()
+        .await
+        .as_ref()
+        .map(|c| c.definition_signature.clone());
+
+    // Snapshot the target page (and current signature) and drop the
+    // definition lock before the blocking burn call below — a flash burn
+    // (erase + program cycle) is typically slower than a plain read/write,
+    // so holding the lock across it starves other commands for longer than
+    // usual.
     let mut conn_guard = state.connection.lock().await;
-    let page = {
+    let (page, current_signature) = {
         let def_guard = state.definition.lock().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
         let table = def
@@ -263,9 +345,13 @@ pub async fn burn_autotune_recommendations(
             .constants
             .get(&table.map)
             .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
-        constant.page
+        (constant.page, def.signature.clone())
     };
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+
+    // Refuse to burn against a different ECU definition than the AutoTune
+    // session started against — see send_autotune_recommendations for why.
+    check_definition_matches(&session_signature, &current_signature, "burning")?;
 
     let params = libretune_core::protocol::commands::BurnParams { can_id: 0, page };
 
@@ -356,12 +442,14 @@ pub async fn start_autotune_autosend(
             ticker.tick().await;
 
             // Run send_autotune_recommendations logic
-            let secondary_name = app_state
-                .autotune_config
-                .lock()
-                .await
-                .as_ref()
-                .and_then(|config| config.secondary_table_name.clone());
+            let (secondary_name, session_signature) = {
+                let config_guard = app_state.autotune_config.lock().await;
+                let config = config_guard.as_ref();
+                (
+                    config.and_then(|c| c.secondary_table_name.clone()),
+                    config.map(|c| c.definition_signature.clone()),
+                )
+            };
 
             let recs = if matches!(
                 (Some(table.as_str()), secondary_name.as_deref()),
@@ -387,6 +475,14 @@ pub async fn start_autotune_autosend(
                     None => continue,
                 }
             };
+
+            // Skip this tick if the definition changed out from under the
+            // session (e.g. reconnected to a different ECU/INI) — see
+            // send_autotune_recommendations for why this matters.
+            if check_definition_matches(&session_signature, &def.signature, "autosending").is_err()
+            {
+                continue;
+            }
 
             let mut conn_guard = app_state.connection.lock().await;
             let conn = match conn_guard.as_mut() {

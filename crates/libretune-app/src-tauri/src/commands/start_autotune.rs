@@ -25,6 +25,7 @@ pub async fn start_autotune(
     // Get the table definition to extract bin values
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("No ECU definition loaded")?;
+    let definition_signature = def.signature.clone();
     let cache_guard = state.tune_cache.lock().await;
     let cache = cache_guard.as_ref();
 
@@ -131,6 +132,7 @@ pub async fn start_autotune(
     let strict = strict_lambda_match.unwrap_or(true);
     let config = AutoTuneConfig {
         table_name: table_name.clone(),
+        definition_signature,
         secondary_table_name: secondary_table_name.clone(),
         settings: settings.clone(),
         filters: filters.clone(),
