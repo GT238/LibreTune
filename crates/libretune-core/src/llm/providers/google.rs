@@ -5,9 +5,7 @@
 //! back as `functionCall` parts.
 
 use crate::llm::provider::Provider;
-use crate::llm::types::{
-    ChatRequest, ChatResponse, FinishReason, LlmError, MessageRole, ToolCall,
-};
+use crate::llm::types::{ChatRequest, ChatResponse, FinishReason, LlmError, MessageRole, ToolCall};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -19,12 +17,7 @@ pub struct GoogleProvider {
 }
 
 impl GoogleProvider {
-    pub fn new(
-        client: reqwest::Client,
-        base_url: String,
-        api_key: String,
-        model: String,
-    ) -> Self {
+    pub fn new(client: reqwest::Client, base_url: String, api_key: String, model: String) -> Self {
         let base_url = if base_url.is_empty() {
             "https://generativelanguage.googleapis.com".to_string()
         } else {
@@ -60,16 +53,22 @@ impl Provider for GoogleProvider {
         for m in &req.messages {
             match m.role {
                 MessageRole::System => {
-                    sys_parts.push(GeminiPart::Text { text: m.content.clone() });
+                    sys_parts.push(GeminiPart::Text {
+                        text: m.content.clone(),
+                    });
                 }
                 MessageRole::User => contents.push(GeminiContent {
                     role: "user".into(),
-                    parts: vec![GeminiPart::Text { text: m.content.clone() }],
+                    parts: vec![GeminiPart::Text {
+                        text: m.content.clone(),
+                    }],
                 }),
                 MessageRole::Assistant => {
                     let mut parts: Vec<GeminiPart> = Vec::new();
                     if !m.content.is_empty() {
-                        parts.push(GeminiPart::Text { text: m.content.clone() });
+                        parts.push(GeminiPart::Text {
+                            text: m.content.clone(),
+                        });
                     }
                     for tc in &m.tool_calls {
                         let args: serde_json::Value =

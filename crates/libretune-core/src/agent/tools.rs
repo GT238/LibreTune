@@ -42,8 +42,7 @@ pub fn catalogue() -> Vec<ToolDef> {
         },
         ToolDef {
             name: tool_names::READ_TABLE.into(),
-            description: "Read the current values, axis bins, and units of one table."
-                .into(),
+            description: "Read the current values, axis bins, and units of one table.".into(),
             parameters: json!({
                 "type": "object",
                 "required": ["table_name"],
@@ -65,8 +64,7 @@ pub fn catalogue() -> Vec<ToolDef> {
         },
         ToolDef {
             name: tool_names::LIST_FEATURES.into(),
-            description: "List feature-toggle (bits) constants and their available options."
-                .into(),
+            description: "List feature-toggle (bits) constants and their available options.".into(),
             parameters: json!({"type": "object", "properties": {}}),
         },
         ToolDef {
@@ -86,8 +84,7 @@ pub fn catalogue() -> Vec<ToolDef> {
         },
         ToolDef {
             name: tool_names::TUNE_HEALTH.into(),
-            description: "Get the overall health score and per-region coverage for a table."
-                .into(),
+            description: "Get the overall health score and per-region coverage for a table.".into(),
             parameters: json!({
                 "type": "object",
                 "required": ["table_name"],

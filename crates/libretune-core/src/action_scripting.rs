@@ -277,9 +277,8 @@ impl ActionPlayer {
                                 }
                                 // 3. bits-type must be an enumerated option value.
                                 if !c.bit_options.is_empty() {
-                                    let allowed: Vec<f64> = (0..c.bit_options.len())
-                                        .map(|i| i as f64)
-                                        .collect();
+                                    let allowed: Vec<f64> =
+                                        (0..c.bit_options.len()).map(|i| i as f64).collect();
                                     if !allowed.contains(new_value) {
                                         errors.push(format!(
                                             "Action {}: Value {} for bits constant '{}' not one of {} ({:?})",

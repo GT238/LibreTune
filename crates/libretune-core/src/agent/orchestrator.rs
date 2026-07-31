@@ -258,23 +258,12 @@ fn map_tool_call(
     };
 
     match tc.name.as_str() {
-        tools::tool_names::PROPOSE_TABLE_EDIT => {
-            map_table_edit(&args, inputs, authority, tc).unwrap_or_else(|errs| {
-                failed(
-                    Action::Pause { duration_ms: 0 },
-                    errs,
-                    tc,
-                )
-            })
-        }
-        tools::tool_names::PROPOSE_CONSTANT_CHANGE => {
-            map_constant_change(&args, tc).unwrap_or_else(|errs| {
-                failed(Action::Pause { duration_ms: 0 }, errs, tc)
-            })
-        }
-        tools::tool_names::PROPOSE_BULK_OP => {
-            map_bulk_op(&args, tc).unwrap_or_else(|errs| failed(Action::Pause { duration_ms: 0 }, errs, tc))
-        }
+        tools::tool_names::PROPOSE_TABLE_EDIT => map_table_edit(&args, inputs, authority, tc)
+            .unwrap_or_else(|errs| failed(Action::Pause { duration_ms: 0 }, errs, tc)),
+        tools::tool_names::PROPOSE_CONSTANT_CHANGE => map_constant_change(&args, tc)
+            .unwrap_or_else(|errs| failed(Action::Pause { duration_ms: 0 }, errs, tc)),
+        tools::tool_names::PROPOSE_BULK_OP => map_bulk_op(&args, tc)
+            .unwrap_or_else(|errs| failed(Action::Pause { duration_ms: 0 }, errs, tc)),
         // Read tools: they don't produce an action; surface as a no-op note.
         // The command layer answers read calls by feeding results back into
         // the next turn's history.
@@ -334,7 +323,10 @@ fn map_table_edit(
     })
 }
 
-fn map_constant_change(args: &serde_json::Value, _tc: &ToolCall) -> Result<ProposedAction, Vec<String>> {
+fn map_constant_change(
+    args: &serde_json::Value,
+    _tc: &ToolCall,
+) -> Result<ProposedAction, Vec<String>> {
     let name = get_str(args, "name")?;
     let value = get_f64(args, "value")?;
     let reason = get_str(args, "reason").ok();
@@ -372,12 +364,18 @@ fn map_bulk_op(args: &serde_json::Value, _tc: &ToolCall) -> Result<ProposedActio
         .ok_or_else(|| vec!["missing 'cells' array".to_string()])?;
     let mut cells: Vec<(u16, u16)> = Vec::with_capacity(cells_arr.len());
     for c in cells_arr {
-        let arr = c.as_array().ok_or_else(|| vec!["cell must be [x,y]".to_string()])?;
+        let arr = c
+            .as_array()
+            .ok_or_else(|| vec!["cell must be [x,y]".to_string()])?;
         if arr.len() < 2 {
             return Err(vec!["cell must have two elements".to_string()]);
         }
-        let x = arr[0].as_u64().ok_or_else(|| vec!["cell x not integer".to_string()])? as u16;
-        let y = arr[1].as_u64().ok_or_else(|| vec!["cell y not integer".to_string()])? as u16;
+        let x = arr[0]
+            .as_u64()
+            .ok_or_else(|| vec!["cell x not integer".to_string()])? as u16;
+        let y = arr[1]
+            .as_u64()
+            .ok_or_else(|| vec!["cell y not integer".to_string()])? as u16;
         cells.push((x, y));
     }
 
@@ -492,7 +490,8 @@ mod tests {
         let tc = ToolCall {
             id: "1".into(),
             name: tools::tool_names::PROPOSE_TABLE_EDIT.into(),
-            arguments: r#"{"table_name":"veTable1","x_index":0,"y_index":0,"new_value":60.0}"#.into(),
+            arguments: r#"{"table_name":"veTable1","x_index":0,"y_index":0,"new_value":60.0}"#
+                .into(),
         };
         let mut inputs = OrchestratorInputs::default();
         inputs

@@ -121,15 +121,13 @@ pub async fn update_setting(
             let want: bool = value.parse().map_err(|_| "Invalid boolean value")?;
             if want && !settings.ai_risk_acknowledged {
                 return Err(
-                    "Cannot enable AI assistant without acknowledging the risk warning"
-                        .to_string(),
+                    "Cannot enable AI assistant without acknowledging the risk warning".to_string(),
                 );
             }
             settings.ai_assistant_enabled = want;
         }
         "ai_risk_acknowledged" => {
-            settings.ai_risk_acknowledged =
-                value.parse().map_err(|_| "Invalid boolean value")?
+            settings.ai_risk_acknowledged = value.parse().map_err(|_| "Invalid boolean value")?
         }
         "ai_provider" => {
             // Changing the provider invalidates the prior risk ack boundary,

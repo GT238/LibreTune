@@ -233,11 +233,8 @@ pub fn summarize_tune_context(
     let mut suspect_cells: Vec<TuneAnomaly> = Vec::new();
     if rows > 0 && cols > 0 && !inputs.x_bins.is_empty() && !inputs.y_bins.is_empty() {
         let detector = AnomalyDetector::new(AnomalyConfig::default());
-        let mut anomalies = detector.detect_anomalies(
-            inputs.table_values,
-            inputs.x_bins,
-            inputs.y_bins,
-        );
+        let mut anomalies =
+            detector.detect_anomalies(inputs.table_values, inputs.x_bins, inputs.y_bins);
         // Keep the most severe N.
         anomalies.sort_by(|a, b| {
             b.severity

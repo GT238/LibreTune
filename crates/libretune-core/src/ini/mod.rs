@@ -252,9 +252,9 @@ impl EcuDefinition {
             // A table matches a candidate name if either its canonical name
             // or its map_name equals the candidate.
             let matches_any = |names: &[String]| {
-                names.iter().any(|n| {
-                    n == canonical_name || map_name == Some(n.as_str())
-                })
+                names
+                    .iter()
+                    .any(|n| n == canonical_name || map_name == Some(n.as_str()))
             };
 
             if matches_any(&ve_names) {
