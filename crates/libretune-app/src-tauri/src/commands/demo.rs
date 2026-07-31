@@ -150,6 +150,7 @@ pub(crate) async fn apply_demo_enable(
         let mut def_guard = state.definition.lock().await;
         *def_guard = Some(def);
     }
+    crate::commands::data_logging::stop_recording_on_definition_change(state).await;
 
     // Set demo mode flag
     {
