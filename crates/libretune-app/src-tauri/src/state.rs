@@ -125,6 +125,13 @@ pub fn is_maf_channel_name(name: &str) -> bool {
 pub struct AutoTuneConfig {
     #[allow(dead_code)]
     pub table_name: String,
+    /// Signature of the ECU definition this session's bins/tables were
+    /// resolved against. If the loaded definition changes (e.g. reconnect to
+    /// a different ECU/INI) without stopping AutoTune first, recommendations
+    /// computed against the old table layout must not be applied to
+    /// whatever same-named table exists in the new one — checked at
+    /// apply/burn time in autotune_misc.rs.
+    pub definition_signature: String,
     pub secondary_table_name: Option<String>,
     pub settings: AutoTuneSettings,
     pub filters: AutoTuneFilters,
