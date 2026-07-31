@@ -6,9 +6,7 @@
 //! results via a `tool_result` content block.
 
 use crate::llm::provider::Provider;
-use crate::llm::types::{
-    ChatRequest, ChatResponse, FinishReason, LlmError, MessageRole, ToolCall,
-};
+use crate::llm::types::{ChatRequest, ChatResponse, FinishReason, LlmError, MessageRole, ToolCall};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -20,12 +18,7 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    pub fn new(
-        client: reqwest::Client,
-        base_url: String,
-        api_key: String,
-        model: String,
-    ) -> Self {
+    pub fn new(client: reqwest::Client, base_url: String, api_key: String, model: String) -> Self {
         let base_url = if base_url.is_empty() {
             "https://api.anthropic.com".to_string()
         } else {
@@ -68,14 +61,18 @@ impl Provider for AnthropicProvider {
                 }
                 MessageRole::User => messages.push(AnthropicMessage {
                     role: "user".into(),
-                    content: vec![AnthropicContent::Text { text: m.content.clone() }],
+                    content: vec![AnthropicContent::Text {
+                        text: m.content.clone(),
+                    }],
                 }),
                 MessageRole::Assistant => {
                     // Assistant message may carry tool_calls.
                     let mut blocks: Vec<AnthropicContent> =
                         Vec::with_capacity(1 + m.tool_calls.len());
                     if !m.content.is_empty() {
-                        blocks.push(AnthropicContent::Text { text: m.content.clone() });
+                        blocks.push(AnthropicContent::Text {
+                            text: m.content.clone(),
+                        });
                     }
                     for tc in &m.tool_calls {
                         blocks.push(AnthropicContent::ToolUse {
@@ -181,7 +178,9 @@ struct AnthropicMessage {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicContent {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -213,7 +212,9 @@ struct AnthropicResponse {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicResponseContent {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -239,7 +240,11 @@ impl AnthropicResponse {
                 AnthropicResponseContent::Text { text } => content.push_str(&text),
                 AnthropicResponseContent::ToolUse { id, name, input } => {
                     let arguments = serde_json::to_string(&input).unwrap_or_default();
-                    tool_calls.push(ToolCall { id, name, arguments });
+                    tool_calls.push(ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    });
                 }
             }
         }

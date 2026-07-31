@@ -42,8 +42,8 @@ use commands::adaptive_timing::{
     disable_adaptive_timing, enable_adaptive_timing, get_adaptive_timing_stats,
 };
 use commands::agent::{
-    agent_apply_proposals, agent_delete_chat, agent_list_chats, agent_load_chat,
-    agent_save_chat, agent_send_message, agent_status, agent_stop,
+    agent_apply_proposals, agent_delete_chat, agent_list_chats, agent_load_chat, agent_save_chat,
+    agent_send_message, agent_status, agent_stop,
 };
 use commands::annotations::{
     delete_annotation, get_all_annotations, get_annotation, get_table_annotations, set_annotation,

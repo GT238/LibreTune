@@ -166,7 +166,6 @@ pub async fn agent_delete_chat(
     Ok(())
 }
 
-
 /// A serialized [`Message`] that round-trips through JSON.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializedMessage {
@@ -566,4 +565,3 @@ pub async fn agent_apply_proposals(
 
     Ok(results)
 }
-

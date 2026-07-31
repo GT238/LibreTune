@@ -140,7 +140,6 @@ pub(crate) struct Settings {
     // All gated behind `ai_assistant_enabled`, which itself requires
     // `ai_risk_acknowledged`. The model only ever *proposes* changes; nothing
     // burns to the ECU automatically.
-
     /// Master enable for the AI assistant. Must be paired with a risk ack.
     #[serde(default = "default_false")]
     pub(crate) ai_assistant_enabled: bool,

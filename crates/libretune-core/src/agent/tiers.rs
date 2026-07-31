@@ -160,10 +160,7 @@ mod tests {
     #[test]
     fn unknown_defaults_to_caution() {
         // A fuel-related constant that isn't in either list.
-        assert_eq!(
-            constant_safety_tier("reqFuel"),
-            ConstantSafetyTier::Caution
-        );
+        assert_eq!(constant_safety_tier("reqFuel"), ConstantSafetyTier::Caution);
         assert_eq!(
             constant_safety_tier("idleRpmTarget"),
             ConstantSafetyTier::Caution

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 
@@ -31,6 +31,16 @@ describe('SettingsDialog', () => {
       </UnitPreferencesProvider>
     );
 
+    // The dialog also fires get_hotkey_bindings/get_available_channels/
+    // get_demo_mode on mount (unmocked here, so they resolve via the
+    // catch-all Promise.resolve() branch above). Flush a macrotask tick
+    // inside act() so their .then() chains fully settle now — otherwise
+    // one can resolve in the gap between two later awaits and log a real
+    // (if harmless) "not wrapped in act(...)" warning.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
     // Find the runtime select and ensure value is loaded
     // Locate the runtime select specifically by its label
     const label = screen.getByText('Default Runtime Packet Mode');
@@ -45,7 +55,7 @@ describe('SettingsDialog', () => {
 
     // Click Apply
     const applyBtn = screen.getByText('Apply');
-    userEvent.click(applyBtn);
+    await userEvent.click(applyBtn);
 
     // Ensure update_setting called with runtime_packet_mode and that it matches the select's value
     const expectedMode = runtimeSelect.value;
@@ -56,6 +66,13 @@ describe('SettingsDialog', () => {
     // Also ensure auto_reconnect setting is saved
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('update_setting', { key: 'auto_reconnect_after_controller_command', value: 'false' });
+    });
+
+    // Flush once more so any state update Apply triggers after its last
+    // update_setting call (e.g. a save-status flag) settles inside act()
+    // before we assert on console.error below.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     // No unexpected console errors (React warnings)

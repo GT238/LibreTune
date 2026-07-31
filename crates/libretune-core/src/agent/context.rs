@@ -6,7 +6,7 @@
 //! unit-testable without a live provider.
 
 use crate::action_scripting::Action;
-use crate::agent::summarize::{summarize_tune_context, TuneContextSummary, TuneContextInputs};
+use crate::agent::summarize::{summarize_tune_context, TuneContextInputs, TuneContextSummary};
 use crate::agent::tiers::{constant_safety_tier, ConstantSafetyTier};
 use crate::ini::{Constant, EcuDefinition, TableDefinition, TableRole};
 use serde::{Deserialize, Serialize};

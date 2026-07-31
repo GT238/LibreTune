@@ -4,10 +4,10 @@
 //! OpenAI-compatible endpoint (OpenRouter, Ollama's `/v1`, LM Studio, vLLM,
 //! etc.). Set [`OpenAiProvider::base_url`] to point at a compatible host.
 
+use crate::llm::provider::Provider;
 use crate::llm::types::{
     ChatRequest, ChatResponse, FinishReason, LlmError, Message, MessageRole, ToolCall,
 };
-use crate::llm::provider::Provider;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -23,12 +23,7 @@ impl OpenAiProvider {
     /// Construct. `base_url` should NOT include the trailing
     /// `/chat/completions` path (it is appended). Default for hosted OpenAI:
     /// `https://api.openai.com/v1`.
-    pub fn new(
-        client: reqwest::Client,
-        base_url: String,
-        api_key: String,
-        model: String,
-    ) -> Self {
+    pub fn new(client: reqwest::Client, base_url: String, api_key: String, model: String) -> Self {
         let base_url = if base_url.is_empty() {
             "https://api.openai.com/v1".to_string()
         } else {
@@ -79,11 +74,7 @@ impl Provider for OpenAiProvider {
         let body = OpenAiRequest {
             model: self.model.clone(),
             messages,
-            tools: if tools.is_empty() {
-                None
-            } else {
-                Some(tools)
-            },
+            tools: if tools.is_empty() { None } else { Some(tools) },
             temperature: req.temperature,
             max_tokens: req.max_tokens,
             tool_choice: if has_tools {

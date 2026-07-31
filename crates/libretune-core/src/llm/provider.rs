@@ -43,12 +43,14 @@ pub fn build_provider(cfg: &ProviderConfig) -> Result<Box<dyn Provider>, LlmErro
         .map_err(|e| LlmError::Config(format!("failed to build HTTP client: {e}")))?;
 
     match cfg.provider.to_lowercase().as_str() {
-        "openai" | "" => Ok(Box::new(crate::llm::providers::openai::OpenAiProvider::new(
-            client,
-            cfg.base_url.clone(),
-            cfg.api_key.clone(),
-            cfg.model.clone(),
-        ))),
+        "openai" | "" => Ok(Box::new(
+            crate::llm::providers::openai::OpenAiProvider::new(
+                client,
+                cfg.base_url.clone(),
+                cfg.api_key.clone(),
+                cfg.model.clone(),
+            ),
+        )),
         "anthropic" | "claude" => Ok(Box::new(
             crate::llm::providers::anthropic::AnthropicProvider::new(
                 client,
