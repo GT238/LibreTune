@@ -13,6 +13,74 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-07-31 — Menu i18n fix, menu-bar grouping, settings search
+
+Closes [#72 ([BUG] Languages)](https://github.com/RallyPat/LibreTune/issues/72)
+and adds related menu/toolbar UX improvements.
+
+#### Fixed
+- **Partial menu/toolbar translation (Issue #72)** — switching language only
+  translated the menu *titles* and the Help submenu items; File/Edit/View/Tools
+  *items* and all toolbar tooltips stayed English. Root cause: `buildMenuItems.ts`
+  and `buildToolbarItems.tsx` hardcoded English label/tooltip strings instead of
+  routing them through the already-wired `t()` function, masking the fact that
+  every key already existed in all locale files. Fix routes all items through
+  `t()` and bakes the `&` access-key mnemonic and `\tCtrl+X` shortcut into each
+  locale value (required by `MenuBar.tsx`, which parses them from the label).
+  - `buildToolbarItems.tsx` now accepts a `t: TFunction` (previously took none).
+  - App.tsx gains `useTranslation('common')` for toolbar tooltips; a new
+    `toolbar` section was added to all three locale `common.json` files.
+  - `setupTests.ts` now initializes i18n (`import './i18n'`) so `t()` resolves
+    real strings under test (previously returned raw key paths, masked by the
+    old hardcoded English).
+  - Hungarian `help.title` mnemonic fixed (`&Segítség`) for consistency.
+  - New regression tests in `i18n/__tests__/i18n.test.ts`: locale key-parity
+    across `en`/`pt-BR`/`hu-HU`, per-locale menu/toolbar resolution, and
+    mnemonic/shortcut survival across locales.
+
+#### Added
+- **Menu-bar grouping with dividers** — the top menu bar is now organized into
+  three zones separated by vertical rules: `File Edit View Tools │ <ECU/INI
+  menus> │ Help`. The app-action menus (translated, stable positions) are
+  grouped left, the ECU tuning menus (INI-native, intentionally untranslated) sit
+  in the middle, and Help stays rightmost per convention. `Tools` moved left to
+  join the app menus (it was previously buried after the ECU menus). Dividers are
+  omitted entirely when there are no ECU menus (no dangling rule). Implementation:
+  `MenuBar.tsx` top-level render loop now branches on `item.separator`, and
+  ArrowRight/Left keyboard navigation computes next/prev over a focusable-filtered
+  list so focus hops over dividers without landing on them.
+- **"Show ECU menus in menu bar" setting** — a new Appearance → Layout toggle
+  (default ON) hides the INI tuning menus from the top bar for a leaner layout.
+  The menus remain reachable in the (permanent, collapsible) sidebar. New backend
+  setting field `show_ecu_menus_in_menubar` with `update_setting` arm; live
+  re-render + persistence across restarts.
+- **Settings search bar** — the Settings dialog now has a search box in its title
+  bar that filters settings **across all tabs** as you type (mirrors the sidebar
+  search UX). Matching `<h3>`-anchored sections surface in a flat view (tab bar
+  hides while searching); a "No settings found" message appears on no match.
+  Implementation uses a DOM-based scan (matches each section's full `textContent`,
+  so every label/option/note is searchable with no curated index). Panels
+  all-render only during an active search to preserve existing test stability.
+
+#### Fixed (session follow-ups)
+- **Sidebar hidden by default / zeroed-out settings** — the `Settings` struct
+  derived `Default`, which sets every `bool` to `false` and every `String` to
+  `""`, *ignoring* the `#[serde(default = "default_true")]` attributes (those
+  only apply during deserialization). When `load_settings()` had no/invalid
+  file it fell back to `Settings::default()`, so every `default_true` field
+  (sidebar visibility, auto-sync gauge ranges, heatmap schemes, auto-reconnect,
+  FOME fast comms, alert rules, etc.) silently became false/blank and got
+  persisted to disk. Replaced with an explicit `default_settings()` that uses
+  the same default fns as the serde attributes, and repaired existing corrupt
+  settings files on load.
+- **Settings Apply/OK buttons stuck disabled** — `saveSettings()` set
+  `saveStatus = 'saving'` (disabling both buttons) but the final status
+  transition was only reached on the happy path; any unexpected throw left the
+  dialog stuck at `'saving'` so the user had to close it via the window's X.
+  Wrapped the save body in `try/catch/finally` so `saveStatus` is guaranteed
+  to resolve to `'saved'`/`'error'`. Restores Windows convention: Apply saves
+  and keeps the dialog open (buttons re-enable); OK saves and closes.
+
 ### 2026-07-31 — Chat history, stop button, UI state persistence
 
 Enhancements to the AI assistant and overall workspace UX.

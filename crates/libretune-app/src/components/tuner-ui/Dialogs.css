@@ -123,6 +123,75 @@
   width: 100%;
 }
 
+/* Settings search (in the dialog title bar) */
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  position: relative;
+  flex: 0 1 320px;
+}
+
+.settings-search-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.settings-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  padding-right: 26px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-input, var(--bg-secondary));
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.settings-search-input:focus {
+  border-color: var(--primary);
+}
+
+.settings-search-input::-webkit-search-cancel-button {
+  /* Hide native cancel; we render our own for consistent styling. */
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.settings-search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.settings-search-clear:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* "No results" message shown when a settings search matches nothing. */
+.settings-search-no-results {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
 .dialog-loading {
   display: flex;
   align-items: center;

@@ -48,5 +48,19 @@
     "size": "Size",
     "modified": "Modified",
     "search": "Search"
+  },
+  "toolbar": {
+    "openTune": "Open Tune",
+    "saveTune": "Save Tune",
+    "burnDisconnected": "Connect to ECU to burn changes",
+    "burnPending": "Burn pending changes to ECU",
+    "burnNone": "No changes to burn to ECU",
+    "disconnect": "Disconnect",
+    "connect": "Connect to ECU",
+    "connectionInfo": "Connection status and packet mode",
+    "realtime": "Realtime Dashboard",
+    "stopLogging": "Stop Logging",
+    "startLogging": "Start Logging",
+    "settings": "Settings"
   }
 }

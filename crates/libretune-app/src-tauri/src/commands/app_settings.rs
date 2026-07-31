@@ -36,6 +36,10 @@ pub(crate) struct Settings {
     /// Whether the left sidebar is visible.
     #[serde(default = "default_true")]
     pub(crate) sidebar_visible: bool,
+    /// Whether ECU-derived (INI) tuning menus are shown in the top menu bar.
+    /// When disabled, those menus are still reachable from the sidebar.
+    #[serde(default = "default_true")]
+    pub(crate) show_ecu_menus_in_menubar: bool,
     /// Whether the AI assistant side panel is visible.
     #[serde(default)]
     pub(crate) agent_panel_visible: bool,
@@ -231,6 +235,74 @@ pub(crate) fn get_commit_message_format(app: &tauri::AppHandle) -> String {
     load_settings(app).commit_message_format
 }
 
+/// Construct the default `Settings` using the SAME values serde applies when a
+/// field is missing during deserialization.
+///
+/// This is intentionally **not** the derived `Default` impl (which sets every
+/// `bool` to `false` and every `String` to `""`, ignoring the `#[serde(default =
+/// "...")]` attributes). Using `Settings::default()` as the no-file fallback
+/// was the root cause of `sidebar_visible` (and every other `default_true`
+/// field) silently becoming `false` on first run, because the all-`false`
+/// struct was then written back to disk. Keep this in sync with the
+/// `#[serde(default = "...")]` attributes on the struct fields.
+fn default_settings() -> Settings {
+    Settings {
+        last_ini_path: None,
+        units_system: String::new(),
+        auto_burn_on_close: false,
+        gauge_snap_to_grid: false,
+        gauge_free_move: false,
+        gauge_lock: false,
+        auto_sync_gauge_ranges: default_true(),
+        indicator_column_count: String::new(),
+        indicator_fill_empty: false,
+        indicator_text_fit: String::new(),
+        status_bar_channels: Vec::new(),
+        show_all_help_icons: default_true(),
+        last_project_path: None,
+        last_active_tab: None,
+        sidebar_visible: default_true(),
+        show_ecu_menus_in_menubar: default_true(),
+        agent_panel_visible: false,
+        sidebar_expanded_ids: None,
+        selected_dashboard: None,
+        open_tabs: None,
+        table_y_axis_bottom: false,
+        table_cursor_color: String::new(),
+        table_trail_color: String::new(),
+        table_trail_fade_sec: default_trail_fade_sec(),
+        heatmap_value_scheme: default_heatmap_scheme(),
+        heatmap_change_scheme: default_heatmap_scheme(),
+        heatmap_coverage_scheme: default_heatmap_scheme(),
+        heatmap_value_custom: Vec::new(),
+        heatmap_change_custom: Vec::new(),
+        heatmap_coverage_custom: Vec::new(),
+        auto_commit_on_save: default_auto_commit(),
+        commit_message_format: default_commit_message_format(),
+        runtime_packet_mode: default_runtime_packet_mode(),
+        last_serial_port: None,
+        auto_reconnect_after_controller_command: default_true(),
+        auto_reconnect_after_firmware: default_true(),
+        fome_fast_comms_enabled: default_true(),
+        auto_record_enabled: default_false(),
+        key_on_threshold_rpm: default_key_on_rpm(),
+        key_off_timeout_sec: default_key_off_timeout(),
+        alert_large_change_enabled: default_true(),
+        alert_large_change_abs: default_alert_large_change_abs(),
+        alert_large_change_percent: default_alert_large_change_percent(),
+        hotkey_bindings: HashMap::new(),
+        onboarding_completed: false,
+        language: None,
+        ai_assistant_enabled: false,
+        ai_risk_acknowledged: false,
+        ai_provider: default_ai_provider(),
+        ai_base_url: String::new(),
+        ai_api_key: String::new(),
+        ai_model: String::new(),
+        ai_capability_tier: default_ai_capability(),
+    }
+}
+
 pub(crate) fn load_settings(app: &tauri::AppHandle) -> Settings {
     let settings_path = get_settings_path(app);
     if let Ok(content) = std::fs::read_to_string(&settings_path) {
@@ -242,7 +314,7 @@ pub(crate) fn load_settings(app: &tauri::AppHandle) -> Settings {
         }
     }
     // Ensure default runtime mode is set when no file exists
-    let mut s = Settings::default();
+    let mut s = default_settings();
     if s.runtime_packet_mode.trim().is_empty() {
         s.runtime_packet_mode = default_runtime_packet_mode();
     }

@@ -106,6 +106,10 @@ import "./styles";
 function AppContent() {
   const { theme, setTheme } = useTheme();
   const { t } = useTranslation('menu');
+  // Toolbar tooltips live in the `common` namespace; keep a separate bound
+  // t-function rather than switching the menu hook to an array namespace
+  // (which would change unqualified-key resolution for menu.* calls).
+  const { t: tCommon } = useTranslation('common');
   const { showLoading, hideLoading } = useLoading();
   const { showToast } = useToast();
   const { isOpen: errorDialogOpen, errorInfo, showError, hideError } = useErrorDialog();
@@ -201,6 +205,9 @@ function AppContent() {
 
   // Sidebar state
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  // Whether ECU-derived (INI) tuning menus appear in the top menu bar.
+  // When off, they remain available in the sidebar.
+  const [showEcuMenusInMenubar, setShowEcuMenusInMenubar] = useState(true);
 
   // Gate: don't persist UI state until after the initial restore from
   // settings has completed. Without this, the persist effects fire on first
@@ -321,6 +328,10 @@ function AppContent() {
   }, [sidebarVisible]);
   useEffect(() => {
     if (!uiStateRestored.current) return;
+    void invoke('update_setting', { key: 'show_ecu_menus_in_menubar', value: String(showEcuMenusInMenubar) }).catch(() => {});
+  }, [showEcuMenusInMenubar]);
+  useEffect(() => {
+    if (!uiStateRestored.current) return;
     void invoke('update_setting', { key: 'agent_panel_visible', value: String(agentPanelVisible) }).catch(() => {});
   }, [agentPanelVisible]);
 
@@ -382,6 +393,7 @@ function AppContent() {
         if (settings.last_serial_port) setLastSerialPort(settings.last_serial_port);
         // Restore UI layout state.
         if (settings.sidebar_visible !== undefined) setSidebarVisible(!!settings.sidebar_visible);
+        if (settings.show_ecu_menus_in_menubar !== undefined) setShowEcuMenusInMenubar(!!settings.show_ecu_menus_in_menubar);
         if (settings.agent_panel_visible !== undefined) setAgentPanelVisible(!!settings.agent_panel_visible);
         // Mark restore complete so the persist effects can start saving.
         uiStateRestored.current = true;
@@ -1400,7 +1412,7 @@ function AppContent() {
 
   const menuItems: TunerMenuItem[] = useMemo(() => buildMenuItems({
     t, currentProject, tuneModified, status, ecuType, iniCapabilities, backendMenus, theme,
-    sidebarVisible, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
+    sidebarVisible, showEcuMenus: showEcuMenusInMenubar, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
     closeProject, handleCreateRestorePoint,
     setNewProjectDialogOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
     setBurnDialogOpen, setFirmwareUpdateDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
@@ -1408,7 +1420,7 @@ function AppContent() {
     setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, agentPanelVisible, setAgentPanelVisible, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
     setTheme, setTabs, setTabContents, setActiveTabId,
-  }), [backendMenus, theme, sidebarVisible, agentPanelVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs]);
+  }), [backendMenus, theme, sidebarVisible, showEcuMenusInMenubar, agentPanelVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs]);
 
   // Listen for the agent pop-out window's "dock back" signal: re-show the
   // docked side panel. (Mirrors the tab:dock handling in useTabPopout.)
@@ -1427,10 +1439,10 @@ function AppContent() {
 
   // Toolbar items
   const toolbarItems: ToolbarItem[] = useMemo(() => buildToolbarItems({
-    status, tuneModified, iniCapabilities, isLogging, connectionRuntimePacketMode, defaultRuntimePacketMode,
+    t: tCommon, status, tuneModified, iniCapabilities, isLogging, connectionRuntimePacketMode, defaultRuntimePacketMode,
     setLoadDialogOpen, setSaveDialogOpen, setBurnDialogOpen, setConnectionDialogOpen,
     setSettingsDialogOpen, setActiveTabId, setIsLogging,
-  }), [status, tuneModified, isLogging, iniCapabilities, connectionRuntimePacketMode, defaultRuntimePacketMode]);
+  }), [tCommon, status, tuneModified, isLogging, iniCapabilities, connectionRuntimePacketMode, defaultRuntimePacketMode]);
 
   const sidebarItems: SidebarNode[] = useMemo(() => {
     // Build menu-based sidebar items from INI menus
@@ -1625,6 +1637,8 @@ function AppContent() {
         setSettingsDialogOpen={setSettingsDialogOpen}
         setUnitsSystem={setUnitsSystem}
         setAutoBurnOnClose={setAutoBurnOnClose}
+        showEcuMenusInMenubar={showEcuMenusInMenubar}
+        setShowEcuMenusInMenubar={setShowEcuMenusInMenubar}
         setStatus={setStatus}
         setStatusBarChannels={setStatusBarChannels}
         setDefaultRuntimePacketMode={setDefaultRuntimePacketMode}

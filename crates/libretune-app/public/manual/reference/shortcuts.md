@@ -13,6 +13,27 @@ Complete reference for LibreTune keyboard shortcuts.
 | Ctrl+B | Burn to ECU |
 | Ctrl+Q | Quit application |
 
+## Menu Navigation
+
+The top menu bar supports Windows-style **Alt + access key** navigation. Each
+menu has one underlined letter (the access key); press `Alt` plus that letter to
+open the menu, then use `Arrow` keys to move and `Enter` to select.
+
+| Shortcut | Action |
+|----------|--------|
+| Alt+F | Open the File menu |
+| Alt+E | Open the Edit menu |
+| Alt+V | Open the View menu |
+| Alt+T | Open the Tools menu |
+| Alt+(letter) | Open the ECU menu with that underlined letter |
+| ← / → | Move between top-level menus |
+| ↑ / ↓ | Move within an open menu |
+| Enter | Activate the highlighted menu item |
+| Esc | Close the open menu |
+
+> Access keys are part of the translated menu labels, so they may differ by
+> language (e.g. Hungarian *Szerkeszt* opens with `Alt+S` instead of `Alt+E`).
+
 ## ECU Connection
 
 | Shortcut | Action |

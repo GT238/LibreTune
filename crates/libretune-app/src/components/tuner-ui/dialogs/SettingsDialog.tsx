@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { HeatmapScheme, getAvailableSchemes } from '../../../utils/heatmapColors';
@@ -37,9 +37,13 @@ interface SettingsDialogProps extends DialogProps {
   onThemeChange: (theme: string) => void;
   onSettingsChange?: (settings: { units?: string; autoBurnOnClose?: boolean; demoMode?: boolean; indicatorColumnCount?: string; indicatorFillEmpty?: boolean; indicatorTextFit?: string; statusBarChannels?: string[]; runtimePacketMode?: string; autoSyncGaugeRanges?: boolean }) => void;
   currentProject?: CurrentProject | null;
+  /** Whether ECU-derived (INI) tuning menus are shown in the top menu bar. */
+  showEcuMenusInMenubar?: boolean;
+  /** Called when the user toggles the ECU-menus-in-menubar setting. */
+  onEcuMenusInMenubarChange?: (visible: boolean) => void;
 }
 
-export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettingsChange, currentProject }: SettingsDialogProps) {
+export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettingsChange, currentProject, showEcuMenusInMenubar, onEcuMenusInMenubarChange }: SettingsDialogProps) {
   const [localTheme, setLocalTheme] = useState(theme);
   const [localLanguage, setLocalLanguage] = useState<SupportedLanguageCode>(() => {
     try {
@@ -55,6 +59,10 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [saveError, setSaveError] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [tableYAxisBottom, setTableYAxisBottom] = useState(false);
+  // Local mirror of the ECU-menus-in-menubar setting. Seeded from the prop
+  // (authoritative app state) and from get_settings on open; writes go to
+  // both update_setting (persist) and the parent callback (live re-render).
+  const [localShowEcuMenusInMenubar, setLocalShowEcuMenusInMenubar] = useState(true);
   const [tableCursorColor, setTableCursorColor] = useState('');
   const [tableTrailColor, setTableTrailColor] = useState('');
   const [tableTrailFadeSec, setTableTrailFadeSec] = useState(8);
@@ -112,6 +120,11 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   
   // Settings dialog tabs
   const [currentTab, setCurrentTab] = useState<'general' | 'appearance' | 'definitions' | 'hotkeys'>('general');
+  // Settings search: filters sections across ALL tabs as you type, mirroring
+  // the sidebar search UX. Empty query = normal tabbed view.
+  const [settingsQuery, setSettingsQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   // ECU Definitions tab state
   const [iniList, setIniList] = useState<{id: string; name: string; signature: string; path: string; imported: boolean; source: string}[]>([]);
@@ -144,6 +157,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         }
         if (settings.auto_burn_on_close !== undefined) setAutoBurnOnClose(!!settings.auto_burn_on_close);
         if (settings.table_y_axis_bottom !== undefined) setTableYAxisBottom(!!settings.table_y_axis_bottom);
+        if (settings.show_ecu_menus_in_menubar !== undefined) setLocalShowEcuMenusInMenubar(!!settings.show_ecu_menus_in_menubar);
         if (settings.table_cursor_color) setTableCursorColor(settings.table_cursor_color);
         if (settings.table_trail_color) setTableTrailColor(settings.table_trail_color);
         if (settings.table_trail_fade_sec !== undefined) setTableTrailFadeSec(settings.table_trail_fade_sec);
@@ -220,6 +234,18 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     }
   }, [theme, isOpen, currentProject]);
 
+  // Lazy-load the ECU definitions list the first time the user searches, so
+  // the cross-tab search has that content to match against. (Not loaded on
+  // open to avoid unnecessary backend calls when the user never searches.)
+  useEffect(() => {
+    if (!isOpen || !settingsQuery.trim()) return;
+    setIniLoading(true);
+    invoke<any[]>('list_repository_inis')
+      .then((list) => setIniList(Array.isArray(list) ? list : []))
+      .catch(console.error)
+      .finally(() => setIniLoading(false));
+  }, [isOpen, settingsQuery]);
+
   // Focus management for keyboard navigation
   useEffect(() => {
     if (!isOpen) return;
@@ -244,6 +270,98 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
       document.removeEventListener('keydown', handleEscape);
     };
   }, [isOpen, onClose]);
+
+  // Keep the local checkbox in sync with authoritative app state (the prop),
+  // so the control reflects the live value even if it changed elsewhere.
+  useEffect(() => {
+    if (showEcuMenusInMenubar !== undefined) {
+      setLocalShowEcuMenusInMenubar(showEcuMenusInMenubar);
+    }
+  }, [showEcuMenusInMenubar]);
+
+  // Settings search filter: mirrors the sidebar search UX. When the query is
+  // non-empty, sections are matched across ALL tabs (the tab bar is hidden and
+  // every panel is shown) and non-matching sections are hidden. Each section is
+  // delimited by an <h3> header; a section spans from its <h3> to the next <h3>
+  // (or the end of its panel). We match against the section's full textContent
+  // so every label, option, and note is searchable without a curated index.
+  useEffect(() => {
+    const container = contentRef.current;
+    if (!container) return;
+
+    const query = settingsQuery.trim().toLowerCase();
+    const tablist = container.querySelector('.dialog-tabs');
+    const panels = Array.from(container.querySelectorAll<HTMLElement>('.dialog-tab-content'));
+    const noResults = container.querySelector<HTMLElement>('.settings-search-no-results');
+
+    // Helper: gather each <h3>-anchored section as the <h3> plus all siblings
+    // that follow it until the next <h3> (or end of parent). Returns groups of
+    // elements that should be shown/hidden together.
+    const getSections = (): HTMLElement[][] => {
+      const sections: HTMLElement[][] = [];
+      for (const panel of panels) {
+        // Top-of-panel fields before any <h3> form their own implicit section
+        // (e.g. Language/Units on the General tab).
+        const leading: HTMLElement[] = [];
+        let current: HTMLElement[] | null = null;
+        for (let i = 0; i < panel.children.length; i++) {
+          const child = panel.children[i] as HTMLElement;
+          if (child.tagName === 'H3') {
+            if (current) sections.push(current);
+            current = [child];
+          } else if (current) {
+            current.push(child);
+          } else {
+            leading.push(child);
+          }
+        }
+        if (leading.length > 0) sections.push(leading);
+        if (current) sections.push(current);
+      }
+      return sections;
+    };
+
+    if (!query) {
+      // Restore normal tabbed view: re-show the tab bar, clear per-section
+      // inline display styles, and let each panel's `hidden` prop (driven by
+      // currentTab) control visibility again.
+      if (tablist) tablist.removeAttribute('hidden');
+      if (noResults) noResults.hidden = true;
+      panels.forEach(panel => {
+        Array.from(panel.children).forEach(child => {
+          (child as HTMLElement).style.display = '';
+        });
+      });
+      return;
+    }
+
+    // Searching: show all panels, hide the tab bar.
+    if (tablist) tablist.setAttribute('hidden', '');
+    panels.forEach(panel => panel.removeAttribute('hidden'));
+
+    const sections = getSections();
+    let matchCount = 0;
+    for (const section of sections) {
+      const text = section.map(el => el.textContent || '').join(' ').toLowerCase();
+      const matches = text.includes(query);
+      section.forEach(el => {
+        el.style.display = matches ? '' : 'none';
+      });
+      if (matches) matchCount++;
+    }
+
+    if (noResults) noResults.hidden = matchCount > 0;
+  }, [settingsQuery, currentTab, isOpen]);
+
+  // Clear the search when the dialog closes so it reopens in the normal view.
+  useEffect(() => {
+    if (!isOpen) setSettingsQuery('');
+  }, [isOpen]);
+
+  const handleClearSearch = useCallback(() => {
+    setSettingsQuery('');
+    searchInputRef.current?.focus();
+  }, []);
 
   const handleDemoToggle = useCallback(async (enabled: boolean) => {
     setDemoLoading(true);
@@ -319,102 +437,112 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
       }
     };
 
-    onThemeChange(localTheme);
-    // Apply language change immediately and persist it. Dynamically import the
-    // i18n instance so loading this dialog module doesn't drag in i18next on
-    // first paint of the app.
+    // Wrap the whole save body so saveStatus can NEVER get stuck at 'saving'
+    // (which would leave Apply/OK permanently disabled). Any unexpected throw
+    // still resolves the status to 'error' via the finally.
     try {
-      const { default: i18n } = await import('../../../i18n');
-      if (i18n.language !== localLanguage) {
-        await i18n.changeLanguage(localLanguage);
-      }
-    } catch (e) {
-      console.error('Failed to switch language:', e);
-    }
-    try {
-      localStorage.setItem(LANGUAGE_STORAGE_KEY, localLanguage);
-    } catch { /* ignore */ }
-    await set('language', localLanguage);
-    // Update units setting
-    if (localUnits !== 'metric' && localUnits !== 'imperial') {
-      setLocalUnits('metric');
-      await set('units_system', 'metric');
-    } else {
-      await set('units_system', localUnits);
-    }
-    // Update auto-burn setting
-    await set('auto_burn_on_close', autoBurnOnClose.toString());
-    // Update status bar channels
-    await set('status_bar_channels', JSON.stringify(statusBarChannels));
-    // Update indicator panel settings
-    await set('indicator_column_count', indicatorColumnCount);
-    await set('indicator_fill_empty', indicatorFillEmpty.toString());
-    await set('indicator_text_fit', indicatorTextFit);
-    // Update heatmap settings
-    await set('heatmap_value_scheme', heatmapValueScheme);
-    await set('heatmap_change_scheme', heatmapChangeScheme);
-    await set('heatmap_coverage_scheme', heatmapCoverageScheme);
-    // Update gauge settings
-    await set('gauge_snap_to_grid', gaugeSnapToGrid.toString());
-    await set('gauge_free_move', gaugeFreeMove.toString());
-    await set('gauge_lock', gaugeLock.toString());
-    await set('auto_sync_gauge_ranges', autoSyncGaugeRanges.toString());
-    // Update version control settings
-    await set('auto_commit_on_save', autoCommitOnSave);
-    await set('commit_message_format', commitMessageFormat);
-    // Update runtime packet mode
-    await set('runtime_packet_mode', runtimePacketMode);
-    // Update AI assistant settings. Order matters: provider/key first, then
-    // capability tier, then ack, then enable — so the backend's enable-guard
-    // (which requires risk-ack) sees the ack we just sent. Provider/key
-    // changes reset the ack on the backend side; we re-send it afterwards.
-    await set('ai_provider', aiProvider);
-    await set('ai_base_url', aiBaseUrl);
-    await set('ai_api_key', aiApiKey);
-    await set('ai_model', aiModel);
-    await set('ai_capability_tier', aiCapabilityTier);
-    await set('ai_risk_acknowledged', aiRiskAcked.toString());
-    await set('ai_assistant_enabled', aiEnabled.toString());
-    await set('auto_reconnect_after_controller_command', autoReconnectAfterControllerCommand.toString());
-    await set('auto_reconnect_after_firmware', autoReconnectAfterFirmware.toString());
-    // Update auto-record settings
-    await set('auto_record_enabled', autoRecordEnabled.toString());
-    await set('key_on_threshold_rpm', keyOnThresholdRpm.toString());
-    await set('key_off_timeout_sec', keyOffTimeoutSec.toString());
-    // Update alert rules settings
-    await set('alert_large_change_enabled', alertLargeChangeEnabled.toString());
-    await set('alert_large_change_abs', alertLargeChangeAbs.toString());
-    await set('alert_large_change_percent', alertLargeChangePercent.toString());
-
-    // Update hotkey bindings
-    try {
-      await invoke('save_hotkey_bindings', { bindings: hotkeyBindings });
-    } catch (e) {
-      errors.push(`hotkey_bindings: ${String(e)}`);
-    }
-
-    // Update project-specific settings
-    if (currentProject) {
+      onThemeChange(localTheme);
+      // Apply language change immediately and persist it. Dynamically import the
+      // i18n instance so loading this dialog module doesn't drag in i18next on
+      // first paint of the app.
       try {
-        await invoke('update_project_auto_connect', { autoConnect });
+        const { default: i18n } = await import('../../../i18n');
+        if (i18n.language !== localLanguage) {
+          await i18n.changeLanguage(localLanguage);
+        }
       } catch (e) {
-        errors.push(`project_auto_connect: ${String(e)}`);
+        console.error('Failed to switch language:', e);
       }
-    }
+      try {
+        localStorage.setItem(LANGUAGE_STORAGE_KEY, localLanguage);
+      } catch { /* ignore */ }
+      await set('language', localLanguage);
+      // Update units setting
+      if (localUnits !== 'metric' && localUnits !== 'imperial') {
+        setLocalUnits('metric');
+        await set('units_system', 'metric');
+      } else {
+        await set('units_system', localUnits);
+      }
+      // Update auto-burn setting
+      await set('auto_burn_on_close', autoBurnOnClose.toString());
+      // Update status bar channels
+      await set('status_bar_channels', JSON.stringify(statusBarChannels));
+      // Update indicator panel settings
+      await set('indicator_column_count', indicatorColumnCount);
+      await set('indicator_fill_empty', indicatorFillEmpty.toString());
+      await set('indicator_text_fit', indicatorTextFit);
+      // Update heatmap settings
+      await set('heatmap_value_scheme', heatmapValueScheme);
+      await set('heatmap_change_scheme', heatmapChangeScheme);
+      await set('heatmap_coverage_scheme', heatmapCoverageScheme);
+      // Update gauge settings
+      await set('gauge_snap_to_grid', gaugeSnapToGrid.toString());
+      await set('gauge_free_move', gaugeFreeMove.toString());
+      await set('gauge_lock', gaugeLock.toString());
+      await set('auto_sync_gauge_ranges', autoSyncGaugeRanges.toString());
+      // Update version control settings
+      await set('auto_commit_on_save', autoCommitOnSave);
+      await set('commit_message_format', commitMessageFormat);
+      // Update runtime packet mode
+      await set('runtime_packet_mode', runtimePacketMode);
+      // Update AI assistant settings. Order matters: provider/key first, then
+      // capability tier, then ack, then enable — so the backend's enable-guard
+      // (which requires risk-ack) sees the ack we just sent. Provider/key
+      // changes reset the ack on the backend side; we re-send it afterwards.
+      await set('ai_provider', aiProvider);
+      await set('ai_base_url', aiBaseUrl);
+      await set('ai_api_key', aiApiKey);
+      await set('ai_model', aiModel);
+      await set('ai_capability_tier', aiCapabilityTier);
+      await set('ai_risk_acknowledged', aiRiskAcked.toString());
+      await set('ai_assistant_enabled', aiEnabled.toString());
+      await set('auto_reconnect_after_controller_command', autoReconnectAfterControllerCommand.toString());
+      await set('auto_reconnect_after_firmware', autoReconnectAfterFirmware.toString());
+      // Update auto-record settings
+      await set('auto_record_enabled', autoRecordEnabled.toString());
+      await set('key_on_threshold_rpm', keyOnThresholdRpm.toString());
+      await set('key_off_timeout_sec', keyOffTimeoutSec.toString());
+      // Update alert rules settings
+      await set('alert_large_change_enabled', alertLargeChangeEnabled.toString());
+      await set('alert_large_change_abs', alertLargeChangeAbs.toString());
+      await set('alert_large_change_percent', alertLargeChangePercent.toString());
 
-    onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode, autoSyncGaugeRanges });
+      // Update hotkey bindings
+      try {
+        await invoke('save_hotkey_bindings', { bindings: hotkeyBindings });
+      } catch (e) {
+        errors.push(`hotkey_bindings: ${String(e)}`);
+      }
 
-    if (errors.length > 0) {
-      setSaveStatus('error');
-      setSaveError(errors.join('\n'));
-    } else {
-      setSaveStatus('saved');
+      // Update project-specific settings
+      if (currentProject) {
+        try {
+          await invoke('update_project_auto_connect', { autoConnect });
+        } catch (e) {
+          errors.push(`project_auto_connect: ${String(e)}`);
+        }
+      }
+
+      onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode, autoSyncGaugeRanges });
+    } catch (e) {
+      // Catch any unexpected throw so it is surfaced rather than leaving the
+      // dialog stuck in the 'saving' state.
+      errors.push(`unexpected: ${String(e)}`);
+    } finally {
+      if (errors.length > 0) {
+        setSaveStatus('error');
+        setSaveError(errors.join('\n'));
+      } else {
+        setSaveStatus('saved');
+      }
     }
     return errors;
   }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, aiProvider, aiBaseUrl, aiApiKey, aiModel, aiCapabilityTier, aiRiskAcked, aiEnabled, autoReconnectAfterControllerCommand, autoReconnectAfterFirmware, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange]);
 
   // Windows-convention buttons:
-  //  - Apply: save WITHOUT closing (so the user can verify it worked).
+  //  - Apply: save WITHOUT closing (so the user can verify it worked). The
+  //    buttons re-enable as soon as the save resolves (status leaves 'saving').
   //  - OK:     save AND close.
   const handleApply = useCallback(async () => {
     await saveSettings();
@@ -433,6 +561,33 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
       size="xl"
       className="settings-dialog"
       ariaLabel="Settings dialog"
+      titleAdornment={
+        <div className="settings-search">
+          <svg className="settings-search-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M11.5 7a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Zm-.82 4.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06l-3.04-3.04Z" />
+          </svg>
+          <input
+            ref={searchInputRef}
+            type="search"
+            className="settings-search-input"
+            placeholder="Search settings..."
+            value={settingsQuery}
+            onChange={(e) => setSettingsQuery(e.target.value)}
+            aria-label="Search settings"
+          />
+          {settingsQuery && (
+            <button
+              type="button"
+              className="settings-search-clear"
+              onClick={handleClearSearch}
+              title="Clear search"
+              aria-label="Clear search"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      }
     >
         {/* Tab Navigation */}
         <div className="dialog-tabs" role="tablist">
@@ -482,9 +637,12 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
           </button>
         </div>
         
-        <div className="dialog-content">
-          {currentTab === 'general' && (
-            <div className="dialog-tab-content" id="general-panel" role="tabpanel" aria-labelledby="general-tab">
+        <div className="dialog-content" ref={contentRef}>
+          <div className="settings-search-no-results" hidden>
+            No settings found for "{settingsQuery}"
+          </div>
+          {(currentTab === 'general' || settingsQuery.trim()) && (
+            <div className="dialog-tab-content" id="general-panel" role="tabpanel" aria-labelledby="general-tab" hidden={currentTab !== 'general' && !settingsQuery.trim()}>
               <FormField label="Language">
                 {(id) => (
                   <select
@@ -1070,8 +1228,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             </div>
           )}
 
-          {currentTab === 'appearance' && (
-            <div className="dialog-tab-content" id="appearance-panel" role="tabpanel" aria-labelledby="appearance-tab">
+          {(currentTab === 'appearance' || settingsQuery.trim()) && (
+            <div className="dialog-tab-content" id="appearance-panel" role="tabpanel" aria-labelledby="appearance-tab" hidden={currentTab !== 'appearance' && !settingsQuery.trim()}>
               <FormField label="Theme">
                 {() => (
                   <ThemePicker
@@ -1080,6 +1238,25 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
                   />
                 )}
               </FormField>
+
+              <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Layout</h3>
+
+              <div className="dialog-form-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={localShowEcuMenusInMenubar}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      setLocalShowEcuMenusInMenubar(enabled);
+                      invoke('update_setting', { key: 'show_ecu_menus_in_menubar', value: String(enabled) }).catch(() => {});
+                      onEcuMenusInMenubarChange?.(enabled);
+                    }}
+                  />
+                  Show ECU menus in menu bar
+                </label>
+                <span className="dialog-form-note">When off, ECU tuning menus are still available in the sidebar</span>
+              </div>
 
               <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Heatmap Colors</h3>
 
@@ -1195,8 +1372,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             </div>
           )}
 
-          {currentTab === 'definitions' && (
-            <div className="dialog-tab-content" id="definitions-panel" role="tabpanel" aria-labelledby="definitions-tab">
+          {(currentTab === 'definitions' || settingsQuery.trim()) && (
+            <div className="dialog-tab-content" id="definitions-panel" role="tabpanel" aria-labelledby="definitions-tab" hidden={currentTab !== 'definitions' && !settingsQuery.trim()}>
               <div className="dialog-form-group">
                 <label>Imported ECU Definitions (INI Files)</label>
                 <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 12px' }}>
@@ -1271,8 +1448,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             </div>
           )}
 
-          {currentTab === 'hotkeys' && (
-            <div className="dialog-tab-content" id="hotkeys-panel" role="tabpanel" aria-labelledby="hotkeys-tab">
+          {(currentTab === 'hotkeys' || settingsQuery.trim()) && (
+            <div className="dialog-tab-content" id="hotkeys-panel" role="tabpanel" aria-labelledby="hotkeys-tab" hidden={currentTab !== 'hotkeys' && !settingsQuery.trim()}>
               {hotkeysLoading ? (
                 <div className="dialog-loading">Loading keyboard shortcuts...</div>
               ) : (

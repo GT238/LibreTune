@@ -101,10 +101,24 @@ The project aims to provide professional ECU tuning workflow and functionality w
   - `CellEditDialog.tsx` - Cell value editing dialog
 
 ### 7. Menu & Navigation
-- Location: `crates/libretune-app/src/components/MenuManager.ts`
-- Parses INI [Menu] sections, builds hierarchical menu tree
-- Location: `crates/libretune-app/src/components/HotkeyManager.ts`
-- Global keyboard shortcuts (see HotkeyManager for complete list)
+- Top menu bar: `crates/libretune-app/src/menus/buildMenuItems.ts` (builds the
+  hierarchical menu tree from both static app menus and INI `[Menu]` sections),
+  rendered by `crates/libretune-app/src/components/tuner-ui/MenuBar.tsx`.
+- Toolbar: `crates/libretune-app/src/menus/buildToolbarItems.tsx`.
+- Global keyboard shortcuts: `HotkeyManager.ts` (see it for the complete list).
+- **Menu-bar layout (Jul 2026)** — three zones separated by vertical dividers:
+  `File Edit View Tools │ <ECU/INI menus> │ Help`. The top-level menubar render
+  loop branches on `item.separator`; ArrowRight/Left compute next/prev over a
+  focusable-filtered list so keyboard focus hops over dividers. A user setting
+  `show_ecu_menus_in_menubar` (Appearance → Layout, default on) hides the INI
+  tuning menus from the bar (they remain in the sidebar).
+- **Internationalization (i18n)** — `crates/libretune-app/src/i18n/` (init in
+  `index.ts`, language list in `languages.ts`, locale JSON under `locales/`).
+  Namespaces: `common`, `menu`, `dialog`, `errors`. English is the source/fallback.
+  All app-menu labels and toolbar tooltips go through `t()`; the `&` access-key
+  mnemonic and `\tCtrl+X` shortcut are embedded in the locale *values* because
+  `MenuBar.tsx` parses them from the label string. INI-derived menu items and
+  channel names are passed through verbatim (they are ECU content, not chrome).
 
 ### 8. Action Management
 - Location: `crates/libretune-app/src/components/ActionManagement.tsx`
@@ -287,6 +301,17 @@ Based on analysis of common ECU tuning software patterns:
 
 Detailed session-by-session history has moved to [CHANGELOG.md](CHANGELOG.md).
 What follows is a high-level pointer to the most recent cleanup pass.
+
+### UI / menu pass (Jul 2026)
+
+- **Menu i18n (Issue #72)** — all File/Edit/View/Tools menu items and toolbar
+  tooltips now route through `t()` (previously hardcoded English); mnemonics and
+  shortcuts baked into locale values.
+- **Menu-bar grouping** — three zones with dividers
+  (`File Edit View Tools │ ECU │ Help`); Tools pulled left.
+- **Settings search** — title-bar search filters settings across all tabs.
+- See the `2026-07-31 — Menu i18n fix, menu-bar grouping, settings search`
+  CHANGELOG block for details.
 
 ### Phase 1–8 cleanup pass (Apr 2026)
 

@@ -35,6 +35,15 @@
   background: var(--bg-active);
 }
 
+/* Vertical rule separating top-level menu groups (app menus | ECU menus | Help). */
+.menubar-separator {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px var(--space-1);
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
 .menubar-accelerator {
   text-decoration: underline;
 }

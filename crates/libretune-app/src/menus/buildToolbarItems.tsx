@@ -1,10 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ReactNode } from "react";
+import type { TFunction } from "i18next";
 import type { ToolbarItem } from "../components/tuner-ui";
 import ConnectionMetrics from "../components/layout/ConnectionMetrics";
 import type { ConnectionStatus, IniCapabilities } from "../types/app";
 
 export interface BuildToolbarItemsDeps {
+  /** i18n translation function bound to the `common` namespace. */
+  t: TFunction;
   status: ConnectionStatus;
   tuneModified: boolean;
   iniCapabilities: IniCapabilities | null;
@@ -22,7 +25,7 @@ export interface BuildToolbarItemsDeps {
 
 export function buildToolbarItems(deps: BuildToolbarItemsDeps): ToolbarItem[] {
   const {
-    status, tuneModified, iniCapabilities, isLogging, connectionRuntimePacketMode, defaultRuntimePacketMode,
+    t, status, tuneModified, iniCapabilities, isLogging, connectionRuntimePacketMode, defaultRuntimePacketMode,
     setLoadDialogOpen, setSaveDialogOpen, setBurnDialogOpen, setConnectionDialogOpen,
     setSettingsDialogOpen, setActiveTabId, setIsLogging,
   } = deps;
@@ -31,16 +34,16 @@ export function buildToolbarItems(deps: BuildToolbarItemsDeps): ToolbarItem[] {
   const canBurn = connected && tuneModified;
 
   const items: ToolbarItem[] = [
-    { id: "open", icon: "open", tooltip: "Open Tune", onClick: () => setLoadDialogOpen(true) },
-    { id: "save", icon: "save", tooltip: "Save Tune", onClick: () => setSaveDialogOpen(true), disabled: !status.has_definition },
+    { id: "open", icon: "open", tooltip: t('toolbar.openTune'), onClick: () => setLoadDialogOpen(true) },
+    { id: "save", icon: "save", tooltip: t('toolbar.saveTune'), onClick: () => setSaveDialogOpen(true), disabled: !status.has_definition },
     {
       id: "burn",
       icon: "burn",
       tooltip: !connected
-        ? "Connect to ECU to burn changes"
+        ? t('toolbar.burnDisconnected')
         : tuneModified
-          ? "Burn pending changes to ECU"
-          : "No changes to burn to ECU",
+          ? t('toolbar.burnPending')
+          : t('toolbar.burnNone'),
       onClick: () => setBurnDialogOpen(true),
       disabled: !canBurn,
       variant: canBurn ? 'burn-pending' : undefined,
@@ -49,14 +52,14 @@ export function buildToolbarItems(deps: BuildToolbarItemsDeps): ToolbarItem[] {
     {
       id: "connect",
       icon: status.state === "Connected" ? "disconnect" : "connect",
-      tooltip: status.state === "Connected" ? "Disconnect" : "Connect to ECU",
+      tooltip: status.state === "Connected" ? t('toolbar.disconnect') : t('toolbar.connect'),
       active: status.state === "Connected",
       onClick: () => setConnectionDialogOpen(true),
     },
     {
       id: 'connection-info',
       icon: 'connection-info',
-      tooltip: 'Connection status and packet mode',
+      tooltip: t('toolbar.connectionInfo'),
       content: (
         <div className="toolbar-connection-info">
           <ConnectionMetrics compact />
@@ -67,7 +70,7 @@ export function buildToolbarItems(deps: BuildToolbarItemsDeps): ToolbarItem[] {
   ];
 
   if (iniCapabilities?.has_frontpage || iniCapabilities?.has_gauges) {
-    items.push({ id: "realtime", icon: "realtime", tooltip: "Realtime Dashboard", onClick: () => setActiveTabId("dashboard") });
+    items.push({ id: "realtime", icon: "realtime", tooltip: t('toolbar.realtime'), onClick: () => setActiveTabId("dashboard") });
   }
 
   if (iniCapabilities?.has_datalog_entries || iniCapabilities?.has_output_channels) {
@@ -76,7 +79,7 @@ export function buildToolbarItems(deps: BuildToolbarItemsDeps): ToolbarItem[] {
       {
         id: "log-start",
         icon: isLogging ? "log-stop" : "log-start",
-        tooltip: isLogging ? "Stop Logging" : "Start Logging",
+        tooltip: isLogging ? t('toolbar.stopLogging') : t('toolbar.startLogging'),
         active: isLogging,
         onClick: async () => {
           try {
@@ -97,7 +100,7 @@ export function buildToolbarItems(deps: BuildToolbarItemsDeps): ToolbarItem[] {
 
   items.push(
     { id: "sep3", icon: "", tooltip: "", separator: true },
-    { id: "settings", icon: "settings", tooltip: "Settings", onClick: () => setSettingsDialogOpen(true) }
+    { id: "settings", icon: "settings", tooltip: t('toolbar.settings'), onClick: () => setSettingsDialogOpen(true) }
   );
 
   return items;

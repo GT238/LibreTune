@@ -48,5 +48,19 @@
     "size": "Tamanho",
     "modified": "Modificado",
     "search": "Pesquisar"
+  },
+  "toolbar": {
+    "openTune": "Abrir Tune",
+    "saveTune": "Salvar Tune",
+    "burnDisconnected": "Conecte-se à ECU para gravar as alterações",
+    "burnPending": "Gravar alterações pendentes na ECU",
+    "burnNone": "Nenhuma alteração para gravar na ECU",
+    "disconnect": "Desconectar",
+    "connect": "Conectar à ECU",
+    "connectionInfo": "Status da conexão e modo de pacote",
+    "realtime": "Painel em Tempo Real",
+    "stopLogging": "Parar Registro",
+    "startLogging": "Iniciar Registro",
+    "settings": "Configurações"
   }
 }

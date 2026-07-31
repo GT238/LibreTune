@@ -16,6 +16,12 @@ if (typeof globalThis.localStorage === 'undefined') {
   });
 }
 
+// Initialize i18next (side-effect: configures the global i18n instance) so that
+// any component rendered in tests via useTranslation() resolves real translated
+// strings instead of falling back to the raw key path. Mirrors main.tsx, which
+// imports './i18n' before rendering. Defaults to English (the fallback locale).
+import './i18n';
+
 // Provide a minimal ResizeObserver stub for jsdom (not available in JSDOM)
 if (typeof globalThis.ResizeObserver === 'undefined') {
   globalThis.ResizeObserver = class ResizeObserver {
