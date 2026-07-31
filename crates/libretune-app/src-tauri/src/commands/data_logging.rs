@@ -6,6 +6,73 @@ use std::collections::HashMap;
 
 use crate::state::AppState;
 
+/// If `logger` is actively recording, stops it and returns `true`. Pulled
+/// out of `stop_recording_on_definition_change` so the actual stop/preserve
+/// behavior is unit-testable without constructing a full `AppState`.
+fn stop_if_recording(logger: &mut DataLogger) -> bool {
+    if logger.is_recording() {
+        logger.stop();
+        true
+    } else {
+        false
+    }
+}
+
+/// Stops any in-progress recording. Call this from every place that
+/// overwrites `state.definition` (reconnect to a different ECU, load a
+/// different INI, toggle demo mode, open a different project). A running
+/// recording's channel list was resolved against the OLD definition;
+/// continuing to record against a new one can silently record all-zero
+/// columns for channels that no longer exist, or worse, real values from a
+/// same-named channel with different units/scale into the same CSV column
+/// with no indication anything changed. Fail closed instead: stop the
+/// recording (preserving what was already collected) rather than let it
+/// silently keep going against data it was never validated against.
+pub(crate) async fn stop_recording_on_definition_change(state: &AppState) {
+    let mut logger = state.data_logger.lock().await;
+    if stop_if_recording(&mut logger) {
+        eprintln!(
+            "[WARN] Data logging stopped: ECU definition changed mid-recording. \
+             Existing entries are preserved; start a new recording to continue."
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stops_an_active_recording() {
+        let mut logger = DataLogger::new(vec!["rpm".to_string()]);
+        logger.start();
+        assert!(logger.is_recording());
+
+        assert!(stop_if_recording(&mut logger));
+        assert!(!logger.is_recording());
+    }
+
+    #[test]
+    fn no_op_when_not_recording() {
+        let mut logger = DataLogger::new(vec!["rpm".to_string()]);
+        assert!(!logger.is_recording());
+
+        assert!(!stop_if_recording(&mut logger));
+        assert!(!logger.is_recording());
+    }
+
+    #[test]
+    fn preserves_already_recorded_entries() {
+        let mut logger = DataLogger::new(vec!["rpm".to_string()]);
+        logger.start();
+        logger.record(vec![1234.0]);
+        assert_eq!(logger.entry_count(), 1);
+
+        stop_if_recording(&mut logger);
+        assert_eq!(logger.entry_count(), 1);
+    }
+}
+
 #[derive(Serialize)]
 pub struct LoggingStatus {
     is_recording: bool,
@@ -141,42 +208,51 @@ pub async fn clear_log(state: tauri::State<'_, AppState>) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn save_log(state: tauri::State<'_, AppState>, path: String) -> Result<(), String> {
-    let logger = state.data_logger.lock().await;
-    let channels = logger.channels();
+    // Build the CSV string while holding the lock (needed to read the
+    // logger), then drop it before the blocking disk write below — holding
+    // it across std::fs::write stalls every other data-logging command
+    // (stop/status/clear, or a UI status poll) for however long the write
+    // takes.
+    let csv = {
+        let logger = state.data_logger.lock().await;
+        let channels = logger.channels();
 
-    // Skip columns that are zero for the entire log: an INI defines far more
-    // output channels than the ECU (or demo simulator) actually streams, and
-    // those never-seen channels are logged as 0.0. Writing them out buries
-    // the real data in hundreds of dead columns.
-    let mut has_data = vec![false; channels.len()];
-    for entry in logger.entries() {
-        for (i, &val) in entry.values.iter().enumerate() {
-            if val != 0.0 {
-                has_data[i] = true;
+        // Skip columns that are zero for the entire log: an INI defines far
+        // more output channels than the ECU (or demo simulator) actually
+        // streams, and those never-seen channels are logged as 0.0. Writing
+        // them out buries the real data in hundreds of dead columns.
+        let mut has_data = vec![false; channels.len()];
+        for entry in logger.entries() {
+            for (i, &val) in entry.values.iter().enumerate() {
+                if val != 0.0 {
+                    has_data[i] = true;
+                }
             }
         }
-    }
 
-    let mut csv = String::new();
-    csv.push_str("Time (ms)");
-    for (i, channel) in channels.iter().enumerate() {
-        if has_data[i] {
-            csv.push(',');
-            csv.push_str(channel);
-        }
-    }
-    csv.push('\n');
-
-    for entry in logger.entries() {
-        csv.push_str(&format!("{}", entry.timestamp.as_millis()));
-        for (i, val) in entry.values.iter().enumerate() {
+        let mut csv = String::new();
+        csv.push_str("Time (ms)");
+        for (i, channel) in channels.iter().enumerate() {
             if has_data[i] {
                 csv.push(',');
-                csv.push_str(&format!("{:.4}", val));
+                csv.push_str(channel);
             }
         }
         csv.push('\n');
-    }
+
+        for entry in logger.entries() {
+            csv.push_str(&format!("{}", entry.timestamp.as_millis()));
+            for (i, val) in entry.values.iter().enumerate() {
+                if has_data[i] {
+                    csv.push(',');
+                    csv.push_str(&format!("{:.4}", val));
+                }
+            }
+            csv.push('\n');
+        }
+
+        csv
+    };
 
     std::fs::write(&path, csv).map_err(|e| format!("Failed to save log: {}", e))?;
 

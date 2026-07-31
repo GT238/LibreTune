@@ -45,6 +45,12 @@ pub async fn load_ini(
             *guard = Some(def);
             drop(guard);
 
+            // An in-progress recording's channels were resolved against the
+            // OLD definition — stop it rather than silently mixing
+            // incompatible data into the same log. See
+            // stop_recording_on_definition_change for details.
+            crate::commands::data_logging::stop_recording_on_definition_change(&state).await;
+
             // Cache output channels to avoid repeated cloning in realtime streaming loop
             let mut channels_cache_guard = state.cached_output_channels.lock().await;
             *channels_cache_guard = Some(Arc::new(def_clone.output_channels.clone()));
