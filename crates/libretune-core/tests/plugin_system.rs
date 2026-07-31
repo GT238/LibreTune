@@ -66,7 +66,7 @@ fn test_load_instantiates_real_wasm_module() {
     let manifest = create_test_manifest();
     let config = create_test_config();
 
-    let instance = PluginInstance::load(manifest, wasm_file.path(), &config);
+    let instance = PluginInstance::load(manifest, wasm_file.path(), &config, &[]);
     assert!(
         instance.is_ok(),
         "expected a trivial empty module to load and instantiate cleanly: {:?}",
@@ -328,6 +328,294 @@ fn test_permission_bits() {
     }
 
     assert!(!perms.contains(&Permission::ExecuteActions));
+}
+
+// --- Host-function wiring tests -------------------------------------------
+//
+// The tests above exercise the manifest/permission/lifecycle data types in
+// isolation. These exercise the actual boundary a WASM guest crosses to call
+// back into the host: real WAT modules that import `env.*` functions, get
+// instantiated against the real `Linker`, and are driven through
+// `PluginInstance::call_i32_export`/`read_memory` to confirm the permission
+// check and memory marshaling genuinely happen, not just compile.
+
+/// Build and instantiate a `PluginInstance` from inline WAT text.
+fn load_wat(wat: &str, manifest: PluginManifest, approved: &[Permission]) -> PluginInstance {
+    use std::io::Write;
+    let mut wasm_file = tempfile::Builder::new()
+        .suffix(".wasm")
+        .tempfile()
+        .expect("failed to create temp wasm file");
+    wasm_file
+        .write_all(wat.as_bytes())
+        .expect("failed to write test module");
+
+    let config = create_test_config();
+    let mut instance = PluginInstance::load(manifest, wasm_file.path(), &config, approved)
+        .unwrap_or_else(|e| panic!("failed to load WAT module: {e}\n{wat}"));
+    instance.initialize(&config).expect("failed to initialize");
+    instance
+}
+
+fn manifest_requesting(permissions: Vec<Permission>) -> PluginManifest {
+    PluginManifest {
+        name: "wat_test_plugin".to_string(),
+        version: "1.0.0".to_string(),
+        description: "inline WAT test fixture".to_string(),
+        author: "Test".to_string(),
+        permissions,
+    }
+}
+
+#[test]
+fn log_message_requires_no_permission_and_reaches_the_host() {
+    // "hello from plugin" is 17 bytes, written at offset 0 via the data segment.
+    let wat = r#"
+        (module
+            (import "env" "log_message" (func $log_message (param i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "hello from plugin")
+            (func (export "plugin_execute") (result i32)
+                (call $log_message (i32.const 1) (i32.const 0) (i32.const 17))
+            )
+        )
+    "#;
+    let mut instance = load_wat(wat, manifest_requesting(vec![]), &[]);
+    let result = instance
+        .call_i32_export("plugin_execute")
+        .expect("call failed");
+    assert_eq!(
+        result, 0,
+        "log_message should succeed with zero permissions granted"
+    );
+}
+
+#[test]
+fn get_constant_denied_without_read_tables_permission() {
+    let wat = r#"
+        (module
+            (import "env" "get_constant" (func $get_constant (param i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "rpm")
+            (func (export "plugin_execute") (result i32)
+                (call $get_constant (i32.const 0) (i32.const 3) (i32.const 100))
+            )
+        )
+    "#;
+    // Manifest requests ReadTables, but the user approves nothing.
+    let mut instance = load_wat(wat, manifest_requesting(vec![Permission::ReadTables]), &[]);
+    let result = instance
+        .call_i32_export("plugin_execute")
+        .expect("call failed");
+    assert_eq!(
+        result, -1,
+        "expected PERMISSION_DENIED when ReadTables wasn't approved"
+    );
+}
+
+#[test]
+fn get_constant_succeeds_and_writes_result_when_approved() {
+    let wat = r#"
+        (module
+            (import "env" "get_constant" (func $get_constant (param i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "rpm")
+            (func (export "plugin_execute") (result i32)
+                (call $get_constant (i32.const 0) (i32.const 3) (i32.const 100))
+            )
+        )
+    "#;
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![Permission::ReadTables]),
+        &[Permission::ReadTables],
+    );
+    let result = instance
+        .call_i32_export("plugin_execute")
+        .expect("call failed");
+    assert_eq!(result, 0, "expected OK once ReadTables is approved");
+
+    // The host function must have written its 4-byte placeholder value at
+    // the out_ptr the guest supplied (offset 100).
+    let written = instance.read_memory(100, 4).expect("memory read failed");
+    assert_eq!(written.len(), 4);
+}
+
+#[test]
+fn set_constant_denied_without_write_constants_permission() {
+    let wat = r#"
+        (module
+            (import "env" "set_constant" (func $set_constant (param i32 i32 f32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "rpm")
+            (func (export "plugin_execute") (result i32)
+                (call $set_constant (i32.const 0) (i32.const 3) (f32.const 1500))
+            )
+        )
+    "#;
+    // Approve ReadTables (an unrelated permission) to prove it doesn't leak
+    // into a WriteConstants grant.
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![Permission::WriteConstants]),
+        &[Permission::ReadTables],
+    );
+    let result = instance
+        .call_i32_export("plugin_execute")
+        .expect("call failed");
+    assert_eq!(
+        result, -1,
+        "expected PERMISSION_DENIED without WriteConstants"
+    );
+}
+
+#[test]
+fn set_constant_succeeds_when_approved() {
+    let wat = r#"
+        (module
+            (import "env" "set_constant" (func $set_constant (param i32 i32 f32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "rpm")
+            (func (export "plugin_execute") (result i32)
+                (call $set_constant (i32.const 0) (i32.const 3) (f32.const 1500))
+            )
+        )
+    "#;
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![Permission::WriteConstants]),
+        &[Permission::WriteConstants],
+    );
+    let result = instance
+        .call_i32_export("plugin_execute")
+        .expect("call failed");
+    assert_eq!(result, 0);
+}
+
+#[test]
+fn manifest_cannot_self_grant_beyond_what_was_approved() {
+    // Manifest declares all four permissions; user approves only ReadTables.
+    // A guest calling execute_action (ExecuteActions) must still be denied.
+    let wat = r#"
+        (module
+            (import "env" "execute_action" (func $execute_action (param i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "{}")
+            (func (export "plugin_execute") (result i32)
+                (call $execute_action (i32.const 0) (i32.const 2))
+            )
+        )
+    "#;
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![
+            Permission::ReadTables,
+            Permission::WriteConstants,
+            Permission::SubscribeChannels,
+            Permission::ExecuteActions,
+        ]),
+        &[Permission::ReadTables],
+    );
+    assert_eq!(instance.granted_permissions(), &[Permission::ReadTables]);
+    let result = instance
+        .call_i32_export("plugin_execute")
+        .expect("call failed");
+    assert_eq!(
+        result, -1,
+        "self-declaring ExecuteActions in the manifest must not grant it without approval"
+    );
+}
+
+#[test]
+fn oversized_guest_string_length_is_rejected_without_touching_memory() {
+    // Length far larger than MAX_GUEST_STRING_LEN (64 KiB) must be rejected
+    // up front rather than attempting an out-of-bounds memory read.
+    let wat = r#"
+        (module
+            (import "env" "log_message" (func $log_message (param i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (func (export "plugin_execute") (result i32)
+                (call $log_message (i32.const 1) (i32.const 0) (i32.const 1000000))
+            )
+        )
+    "#;
+    let mut instance = load_wat(wat, manifest_requesting(vec![]), &[]);
+    let result = instance
+        .call_i32_export("plugin_execute")
+        .expect("call failed");
+    assert_eq!(
+        result, -2,
+        "oversized length must be rejected as invalid args"
+    );
+}
+
+#[test]
+fn negative_pointer_is_rejected() {
+    let wat = r#"
+        (module
+            (import "env" "log_message" (func $log_message (param i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (func (export "plugin_execute") (result i32)
+                (call $log_message (i32.const 1) (i32.const -1) (i32.const 5))
+            )
+        )
+    "#;
+    let mut instance = load_wat(wat, manifest_requesting(vec![]), &[]);
+    let result = instance
+        .call_i32_export("plugin_execute")
+        .expect("call failed");
+    assert_eq!(
+        result, -2,
+        "negative pointer must be rejected as invalid args"
+    );
+}
+
+#[test]
+fn subscribe_channel_and_get_channel_value_round_trip_with_permission() {
+    let wat = r#"
+        (module
+            (import "env" "subscribe_channel" (func $subscribe_channel (param i32 i32 i32) (result i32)))
+            (import "env" "get_channel_value" (func $get_channel_value (param i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "RPM")
+            (func (export "subscribe") (result i32)
+                (call $subscribe_channel (i32.const 0) (i32.const 3) (i32.const 100))
+            )
+            (func (export "plugin_execute") (result i32)
+                (call $get_channel_value (i32.const 0) (i32.const 104))
+            )
+        )
+    "#;
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![Permission::SubscribeChannels]),
+        &[Permission::SubscribeChannels],
+    );
+    let sub_result = instance.call_i32_export("subscribe").expect("call failed");
+    assert_eq!(sub_result, 0);
+    let value_result = instance
+        .call_i32_export("plugin_execute")
+        .expect("call failed");
+    assert_eq!(value_result, 0);
+}
+
+#[test]
+fn get_table_data_denied_without_read_tables_permission() {
+    let wat = r#"
+        (module
+            (import "env" "get_table_data" (func $get_table_data (param i32 i32 i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "veTable1")
+            (func (export "plugin_execute") (result i32)
+                (call $get_table_data (i32.const 0) (i32.const 8) (i32.const 0) (i32.const 0) (i32.const 100))
+            )
+        )
+    "#;
+    let mut instance = load_wat(wat, manifest_requesting(vec![]), &[]);
+    let result = instance
+        .call_i32_export("plugin_execute")
+        .expect("call failed");
+    assert_eq!(result, -1);
 }
 
 #[test]

@@ -21,10 +21,257 @@
 //!
 //! All API calls check permissions before executing.
 
+use crate::plugin_api;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use wasmtime::{Engine, Instance, Linker, Module, Store};
+use wasmtime::{Caller, Engine, Extern, Instance, Linker, Memory, Module, Store};
+
+/// Maximum length (bytes) accepted for a guest-supplied string argument
+/// (table/constant/channel name, action JSON). Guards against a malicious or
+/// buggy plugin claiming an absurd `len` and forcing a huge host allocation.
+const MAX_GUEST_STRING_LEN: usize = 64 * 1024;
+
+/// Sentinel return codes shared by every host function. Plugin-side glue code
+/// (bindgen or hand-written) should treat any negative value as failure.
+mod host_result {
+    /// Call succeeded.
+    pub const OK: i32 = 0;
+    /// Calling plugin lacks the permission this call requires.
+    pub const PERMISSION_DENIED: i32 = -1;
+    /// Guest pointer/length was invalid (OOB, bad UTF-8, no memory export).
+    pub const INVALID_ARGS: i32 = -2;
+}
+
+/// Per-instance state attached to the plugin's [`wasmtime::Store`]. This is
+/// what host functions consult to know which plugin is calling and what it
+/// was actually granted — never the shared [`PluginManager`], so a host
+/// function invoked from inside a WASM call can never re-enter a lock held by
+/// whatever is currently driving that plugin's execution.
+struct PluginHostState {
+    plugin_name: String,
+    permissions: Vec<Permission>,
+}
+
+/// Fetch the guest's exported linear memory, or an [`host_result::INVALID_ARGS`] error.
+fn get_memory(caller: &mut Caller<'_, PluginHostState>) -> Result<Memory, i32> {
+    match caller.get_export("memory") {
+        Some(Extern::Memory(mem)) => Ok(mem),
+        _ => Err(host_result::INVALID_ARGS),
+    }
+}
+
+/// Read a UTF-8 string out of the guest's linear memory at `ptr`/`len`,
+/// bounds- and size-checked so a hostile plugin can't force an OOB read or an
+/// unbounded host allocation.
+fn read_guest_string(
+    caller: &mut Caller<'_, PluginHostState>,
+    ptr: i32,
+    len: i32,
+) -> Result<String, i32> {
+    if ptr < 0 || len < 0 || len as usize > MAX_GUEST_STRING_LEN {
+        return Err(host_result::INVALID_ARGS);
+    }
+    let memory = get_memory(caller)?;
+    let mut buf = vec![0u8; len as usize];
+    memory
+        .read(&caller, ptr as usize, &mut buf)
+        .map_err(|_| host_result::INVALID_ARGS)?;
+    String::from_utf8(buf).map_err(|_| host_result::INVALID_ARGS)
+}
+
+/// Write raw bytes into the guest's linear memory at `ptr`.
+fn write_guest_bytes(
+    caller: &mut Caller<'_, PluginHostState>,
+    ptr: i32,
+    data: &[u8],
+) -> Result<(), i32> {
+    if ptr < 0 {
+        return Err(host_result::INVALID_ARGS);
+    }
+    let memory = get_memory(caller)?;
+    memory
+        .write(&mut *caller, ptr as usize, data)
+        .map_err(|_| host_result::INVALID_ARGS)
+}
+
+/// Register every host function a plugin may import under the `"env"`
+/// module. Each one checks the calling plugin's *own* granted permissions
+/// (from [`PluginHostState`], fixed at load time) before doing anything —
+/// this is the boundary [`crate::plugin_api`]'s permission checks actually
+/// protect once a plugin can call back into the host at all.
+fn register_host_functions(linker: &mut Linker<PluginHostState>) -> Result<(), String> {
+    linker
+        .func_wrap(
+            "env",
+            "log_message",
+            |mut caller: Caller<'_, PluginHostState>,
+             level: i32,
+             msg_ptr: i32,
+             msg_len: i32|
+             -> i32 {
+                let message = match read_guest_string(&mut caller, msg_ptr, msg_len) {
+                    Ok(s) => s,
+                    Err(code) => return code,
+                };
+                let plugin_name = caller.data().plugin_name.clone();
+                let resp = plugin_api::api_log_message(plugin_name, level, message);
+                if resp.success {
+                    host_result::OK
+                } else {
+                    host_result::INVALID_ARGS
+                }
+            },
+        )
+        .map_err(|e| format!("Failed to register log_message: {}", e))?;
+
+    linker
+        .func_wrap(
+            "env",
+            "get_table_data",
+            |mut caller: Caller<'_, PluginHostState>,
+             name_ptr: i32,
+             name_len: i32,
+             row: i32,
+             col: i32,
+             out_ptr: i32|
+             -> i32 {
+                let table_name = match read_guest_string(&mut caller, name_ptr, name_len) {
+                    Ok(s) => s,
+                    Err(code) => return code,
+                };
+                let permissions = caller.data().permissions.clone();
+                let resp = plugin_api::api_get_table_data(&permissions, &table_name, row, col);
+                if !resp.success {
+                    return host_result::PERMISSION_DENIED;
+                }
+                match write_guest_bytes(&mut caller, out_ptr, &resp.data) {
+                    Ok(()) => host_result::OK,
+                    Err(code) => code,
+                }
+            },
+        )
+        .map_err(|e| format!("Failed to register get_table_data: {}", e))?;
+
+    linker
+        .func_wrap(
+            "env",
+            "get_constant",
+            |mut caller: Caller<'_, PluginHostState>,
+             name_ptr: i32,
+             name_len: i32,
+             out_ptr: i32|
+             -> i32 {
+                let name = match read_guest_string(&mut caller, name_ptr, name_len) {
+                    Ok(s) => s,
+                    Err(code) => return code,
+                };
+                let permissions = caller.data().permissions.clone();
+                let resp = plugin_api::api_get_constant(&permissions, &name);
+                if !resp.success {
+                    return host_result::PERMISSION_DENIED;
+                }
+                match write_guest_bytes(&mut caller, out_ptr, &resp.data) {
+                    Ok(()) => host_result::OK,
+                    Err(code) => code,
+                }
+            },
+        )
+        .map_err(|e| format!("Failed to register get_constant: {}", e))?;
+
+    linker
+        .func_wrap(
+            "env",
+            "set_constant",
+            |mut caller: Caller<'_, PluginHostState>,
+             name_ptr: i32,
+             name_len: i32,
+             value: f32|
+             -> i32 {
+                let name = match read_guest_string(&mut caller, name_ptr, name_len) {
+                    Ok(s) => s,
+                    Err(code) => return code,
+                };
+                let permissions = caller.data().permissions.clone();
+                let resp = plugin_api::api_set_constant(&permissions, &name, &value.to_le_bytes());
+                if resp.success {
+                    host_result::OK
+                } else {
+                    host_result::PERMISSION_DENIED
+                }
+            },
+        )
+        .map_err(|e| format!("Failed to register set_constant: {}", e))?;
+
+    linker
+        .func_wrap(
+            "env",
+            "subscribe_channel",
+            |mut caller: Caller<'_, PluginHostState>,
+             name_ptr: i32,
+             name_len: i32,
+             out_ptr: i32|
+             -> i32 {
+                let name = match read_guest_string(&mut caller, name_ptr, name_len) {
+                    Ok(s) => s,
+                    Err(code) => return code,
+                };
+                let permissions = caller.data().permissions.clone();
+                let resp = plugin_api::api_subscribe_channel(&permissions, &name);
+                if !resp.success {
+                    return host_result::PERMISSION_DENIED;
+                }
+                match write_guest_bytes(&mut caller, out_ptr, &resp.data) {
+                    Ok(()) => host_result::OK,
+                    Err(code) => code,
+                }
+            },
+        )
+        .map_err(|e| format!("Failed to register subscribe_channel: {}", e))?;
+
+    linker
+        .func_wrap(
+            "env",
+            "get_channel_value",
+            |mut caller: Caller<'_, PluginHostState>, channel_id: i32, out_ptr: i32| -> i32 {
+                if channel_id < 0 {
+                    return host_result::INVALID_ARGS;
+                }
+                let permissions = caller.data().permissions.clone();
+                let resp = plugin_api::api_get_channel_value(&permissions, channel_id as u32);
+                if !resp.success {
+                    return host_result::PERMISSION_DENIED;
+                }
+                match write_guest_bytes(&mut caller, out_ptr, &resp.data) {
+                    Ok(()) => host_result::OK,
+                    Err(code) => code,
+                }
+            },
+        )
+        .map_err(|e| format!("Failed to register get_channel_value: {}", e))?;
+
+    linker
+        .func_wrap(
+            "env",
+            "execute_action",
+            |mut caller: Caller<'_, PluginHostState>, json_ptr: i32, json_len: i32| -> i32 {
+                let action_json = match read_guest_string(&mut caller, json_ptr, json_len) {
+                    Ok(s) => s,
+                    Err(code) => return code,
+                };
+                let permissions = caller.data().permissions.clone();
+                let resp = plugin_api::api_execute_action(&permissions, &action_json);
+                if resp.success {
+                    host_result::OK
+                } else {
+                    host_result::PERMISSION_DENIED
+                }
+            },
+        )
+        .map_err(|e| format!("Failed to register execute_action: {}", e))?;
+
+    Ok(())
+}
 
 /// Plugin manifest declaring name, version, and required permissions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,12 +332,14 @@ pub struct PluginInstance {
     /// Plugin metadata
     pub manifest: PluginManifest,
     /// Wasmtime store for this plugin
-    store: Store<()>,
+    store: Store<PluginHostState>,
     /// Wasmtime instance
     instance: Instance,
     /// Current lifecycle state
     pub state: PluginState,
-    /// Granted permissions
+    /// Granted permissions — the intersection of what the manifest requested
+    /// and what the user actually approved at load time. May be a strict
+    /// subset of `manifest.permissions`.
     permissions: Vec<Permission>,
     /// Execution counter for debugging
     exec_count: u64,
@@ -103,6 +352,13 @@ impl PluginInstance {
     /// * `manifest` - Plugin metadata with permissions declaration
     /// * `wasm_path` - Path to .wasm file
     /// * `config` - Initialization configuration
+    /// * `granted_permissions` - Permissions the user actually approved for
+    ///   this load (see [`PluginManager::load_plugin`]). Only permissions
+    ///   that are both requested by the manifest *and* present here are
+    ///   granted — this is the boundary the host functions registered on the
+    ///   plugin's [`wasmtime::Linker`] enforce, so an unapproved permission
+    ///   is never reachable from guest code regardless of what the manifest
+    ///   claims.
     ///
     /// # Returns
     /// Initialized PluginInstance in Loaded state
@@ -115,7 +371,15 @@ impl PluginInstance {
         manifest: PluginManifest,
         wasm_path: &Path,
         _config: &PluginConfig,
+        granted_permissions: &[Permission],
     ) -> Result<Self, String> {
+        let granted: Vec<Permission> = manifest
+            .permissions
+            .iter()
+            .filter(|p| granted_permissions.contains(p))
+            .copied()
+            .collect();
+
         // Create WASM runtime
         let engine = Engine::default();
 
@@ -126,10 +390,16 @@ impl PluginInstance {
         let module = Module::new(&engine, &wasm_bytes)
             .map_err(|e| format!("Failed to load WASM module: {}", e))?;
 
-        let mut store = Store::new(&engine, ());
-        let linker = Linker::new(&engine);
+        let host_state = PluginHostState {
+            plugin_name: manifest.name.clone(),
+            permissions: granted.clone(),
+        };
+        let mut store = Store::new(&engine, host_state);
+        let mut linker: Linker<PluginHostState> = Linker::new(&engine);
+        register_host_functions(&mut linker)?;
 
-        // Instantiate module (minimal setup - full API in plugin_api.rs)
+        // Instantiate module against the permission-checked host-function
+        // surface registered above.
         let instance = linker
             .instantiate(&mut store, &module)
             .map_err(|e| format!("Failed to instantiate module: {}", e))?;
@@ -139,14 +409,16 @@ impl PluginInstance {
             store,
             instance,
             state: PluginState::Loaded,
-            permissions: Vec::new(),
+            permissions: granted,
             exec_count: 0,
         })
     }
 
-    /// Initialize plugin with configuration and validate permissions.
+    /// Initialize plugin with configuration.
     ///
-    /// Moves to `Ready` state if successful.
+    /// Moves to `Ready` state if successful. Permissions were already fixed
+    /// at [`PluginInstance::load`] time — this step only runs the plugin's
+    /// own `plugin_init()` export, it does not grant anything further.
     pub fn initialize(&mut self, _config: &PluginConfig) -> Result<(), String> {
         if self.state != PluginState::Loaded {
             return Err(format!(
@@ -166,9 +438,6 @@ impl PluginInstance {
                 .map_err(|e| format!("Plugin init failed: {}", e))?;
         }
 
-        // Grant declared permissions
-        self.permissions = self.manifest.permissions.clone();
-
         self.state = PluginState::Ready;
         Ok(())
     }
@@ -176,6 +445,42 @@ impl PluginInstance {
     /// Check if plugin has specific permission.
     pub fn has_permission(&self, perm: Permission) -> bool {
         self.permissions.contains(&perm)
+    }
+
+    /// Permissions actually granted to this instance (manifest request ∩
+    /// user approval at load time) — may be fewer than `manifest.permissions`.
+    pub fn granted_permissions(&self) -> &[Permission] {
+        &self.permissions
+    }
+
+    /// Call a zero-argument WASM export that returns `i32` and return its raw
+    /// result. Unlike [`PluginInstance::execute`] (which always reports
+    /// `exec_count` and discards the export's own return value), this
+    /// surfaces exactly what the guest returned — needed to verify host
+    /// functions like `get_constant`/`log_message` actually gave back the
+    /// permission-check result the guest observed.
+    pub fn call_i32_export(&mut self, name: &str) -> Result<i32, String> {
+        let func = self
+            .instance
+            .get_typed_func::<(), i32>(&mut self.store, name)
+            .map_err(|e| format!("Export '{}' not found or wrong signature: {}", name, e))?;
+        func.call(&mut self.store, ())
+            .map_err(|e| format!("Call to '{}' failed: {}", name, e))
+    }
+
+    /// Read `len` bytes from the plugin's exported linear memory at `offset`.
+    /// Lets tests verify a host function wrote its result where the guest
+    /// expected it.
+    pub fn read_memory(&mut self, offset: usize, len: usize) -> Result<Vec<u8>, String> {
+        let memory = self
+            .instance
+            .get_memory(&mut self.store, "memory")
+            .ok_or_else(|| "Plugin has no exported memory".to_string())?;
+        let mut buf = vec![0u8; len];
+        memory
+            .read(&self.store, offset, &mut buf)
+            .map_err(|e| format!("Memory read failed: {}", e))?;
+        Ok(buf)
     }
 
     /// Execute plugin function, returning execution count.
@@ -258,10 +563,18 @@ impl PluginManager {
     }
 
     /// Load a plugin from WASM file.
+    ///
+    /// `approved_permissions` is the set of permissions the user actually
+    /// consented to grant (e.g. via a load-time confirmation dialog) — the
+    /// plugin ends up with the intersection of this set and whatever its own
+    /// manifest requests. A manifest requesting `WriteConstants` that the
+    /// user did not approve simply doesn't get it, silently and safely,
+    /// rather than being auto-granted.
     pub fn load_plugin(
         &mut self,
         manifest: PluginManifest,
         wasm_path: &Path,
+        approved_permissions: &[Permission],
     ) -> Result<String, String> {
         let name = manifest.name.clone();
 
@@ -269,7 +582,8 @@ impl PluginManager {
             return Err(format!("Plugin '{}' already loaded", name));
         }
 
-        let mut plugin = PluginInstance::load(manifest, wasm_path, &self.config)?;
+        let mut plugin =
+            PluginInstance::load(manifest, wasm_path, &self.config, approved_permissions)?;
         plugin.initialize(&self.config)?;
 
         self.plugins.insert(name.clone(), plugin);
