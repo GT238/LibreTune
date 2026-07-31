@@ -40,6 +40,41 @@ fn create_test_config() -> PluginConfig {
     }
 }
 
+/// End-to-end smoke test: actually compiles and instantiates a real WASM
+/// module through `PluginInstance::load()`. Every other test in this file
+/// exercises the permission/manifest/lifecycle layer around the plugin
+/// system without ever touching the wasmtime engine itself (Engine::default,
+/// Module::new, Store::new, Linker::new, instantiate) — this is the only
+/// one that does, so it's the one that actually verifies a wasmtime version
+/// bump didn't change engine/instantiation behavior.
+#[test]
+fn test_load_instantiates_real_wasm_module() {
+    use std::io::Write;
+
+    // Minimal valid module: no imports, no exports, nothing to go wrong.
+    // wasmtime's Module::new accepts WAT text directly (auto-detected), no
+    // separate compile-to-binary step needed.
+    let wat = b"(module)";
+    let mut wasm_file = tempfile::Builder::new()
+        .suffix(".wasm")
+        .tempfile()
+        .expect("failed to create temp wasm file");
+    wasm_file
+        .write_all(wat)
+        .expect("failed to write test module");
+
+    let manifest = create_test_manifest();
+    let config = create_test_config();
+
+    let instance = PluginInstance::load(manifest, wasm_file.path(), &config);
+    assert!(
+        instance.is_ok(),
+        "expected a trivial empty module to load and instantiate cleanly: {:?}",
+        instance.err()
+    );
+    assert_eq!(instance.unwrap().state, PluginState::Loaded);
+}
+
 #[test]
 fn test_plugin_manifest_creation() {
     let manifest = create_test_manifest();
