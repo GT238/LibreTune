@@ -8,20 +8,34 @@ pub async fn update_table_data(
     table_name: String,
     z_values: Vec<Vec<f64>>,
 ) -> Result<(), String> {
-    let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
-    let mut cache_guard = state.tune_cache.lock().await;
+    // Snapshot only what we need from the definition, then drop the lock
+    // before doing any ECU I/O below — holding it across a blocking
+    // conn.write_memory() call starves every other command that needs the
+    // definition. This is the primary table-cell-edit command (the main
+    // table editor calls it on every cell edit), so it's likely the single
+    // most frequently invoked path that had this bug.
+    let (constant, endianness, default_page_bytes) = {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+        let table = def
+            .get_table_by_name_or_map(&table_name)
+            .ok_or_else(|| format!("Table {} not found", table_name))?;
 
-    let table = def
-        .get_table_by_name_or_map(&table_name)
-        .ok_or_else(|| format!("Table {} not found", table_name))?;
+        let constant = def
+            .constants
+            .get(&table.map)
+            .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?
+            .clone();
 
-    let constant = def
-        .constants
-        .get(&table.map)
-        .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
+        let default_page_bytes = def
+            .page_sizes
+            .get(constant.page as usize)
+            .copied()
+            .unwrap_or(256) as usize;
+
+        (constant, def.endianness, default_page_bytes)
+    };
 
     // Flatten z_values
     let flat_values: Vec<f64> = z_values.into_iter().flatten().collect();
@@ -43,8 +57,11 @@ pub async fn update_table_data(
         let offset = i * element_size;
         constant
             .data_type
-            .write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
+            .write_to_bytes(&mut raw_data, offset, raw_val, endianness);
     }
+
+    let mut conn_guard = state.connection.lock().await;
+    let mut cache_guard = state.tune_cache.lock().await;
 
     // Always write to TuneCache if available (enables offline editing)
     if let Some(cache) = cache_guard.as_mut() {
@@ -53,16 +70,10 @@ pub async fn update_table_data(
             let mut tune_guard = state.current_tune.lock().await;
             if let Some(tune) = tune_guard.as_mut() {
                 // Get or create page data
-                let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                    // Create empty page if it doesn't exist
-                    vec![
-                        0u8;
-                        def.page_sizes
-                            .get(constant.page as usize)
-                            .copied()
-                            .unwrap_or(256) as usize
-                    ]
-                });
+                let page_data = tune
+                    .pages
+                    .entry(constant.page)
+                    .or_insert_with(|| vec![0u8; default_page_bytes]);
 
                 // Update the page data
                 let start = constant.offset as usize;
@@ -74,7 +85,7 @@ pub async fn update_table_data(
                 // Offline reads prefer the parsed msq constants over page data,
                 // so keep them in sync or edits revert on reload
                 tune.constants.insert(
-                    table.map.clone(),
+                    constant.name.clone(),
                     libretune_core::tune::TuneValue::Array(flat_values.clone()),
                 );
             }

@@ -14,18 +14,34 @@ pub async fn update_constant_string(
     name: String,
     value: String,
 ) -> Result<(), String> {
-    let def_guard = state.definition.lock().await;
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    // Snapshot only what we need from the definition, then drop the lock
+    // before doing any ECU I/O below — holding it across a blocking
+    // conn.write_memory() call starves every other command that needs the
+    // definition. This command is also used by LuaConsole's script-upload
+    // flow ("Upload + Burn + Reset"), not just direct string-constant edits.
+    let (constant, default_page_bytes) = {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
-    let constant = def
-        .constants
-        .get(&name)
-        .ok_or_else(|| format!("Constant {} not found", name))?;
+        let constant = def
+            .constants
+            .get(&name)
+            .ok_or_else(|| format!("Constant {} not found", name))?
+            .clone();
 
-    // Validate it's a string type
-    if constant.data_type != DataType::String {
-        return Err(format!("Constant {} is not a string type", name));
-    }
+        // Validate it's a string type
+        if constant.data_type != DataType::String {
+            return Err(format!("Constant {} is not a string type", name));
+        }
+
+        let default_page_bytes = def
+            .page_sizes
+            .get(constant.page as usize)
+            .copied()
+            .unwrap_or(256) as usize;
+
+        (constant, default_page_bytes)
+    };
 
     let max_len = constant.size_bytes();
     if max_len == 0 {
@@ -47,17 +63,10 @@ pub async fn update_constant_string(
     // Update TuneFile in memory
     let mut tune_guard = state.current_tune.lock().await;
     if let Some(tune) = tune_guard.as_mut() {
-        let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-            let def_guard_inner = &def;
-            vec![
-                0u8;
-                def_guard_inner
-                    .page_sizes
-                    .get(constant.page as usize)
-                    .copied()
-                    .unwrap_or(256) as usize
-            ]
-        });
+        let page_data = tune
+            .pages
+            .entry(constant.page)
+            .or_insert_with(|| vec![0u8; default_page_bytes]);
         let start = constant.offset as usize;
         let end = start + raw_data.len();
         if end <= page_data.len() {
