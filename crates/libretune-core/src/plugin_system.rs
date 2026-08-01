@@ -44,6 +44,12 @@ mod host_result {
     /// Permission was held, but the requested table/constant/channel/id
     /// doesn't exist in this run's data snapshot.
     pub const NOT_FOUND: i32 = -3;
+    /// Permission was held and the request was recorded, but it will never
+    /// actually run — currently only returned by `execute_action`, since
+    /// LibreTune's action-scripting engine has no dispatcher to call into.
+    /// Deliberately not `OK`, so a plugin can't mistake "accepted" for
+    /// "executed".
+    pub const ACCEPTED_NOT_EXECUTED: i32 = 1;
 }
 
 /// A single table's current axis bins and cell values, captured for one
@@ -392,7 +398,9 @@ fn register_host_functions(linker: &mut Linker<PluginHostState>) -> Result<(), S
                     .data_mut()
                     .proposals
                     .push(PluginProposal::ExecuteAction { action_json });
-                host_result::OK
+                // Deliberately not host_result::OK — see ACCEPTED_NOT_EXECUTED's
+                // doc comment. The proposal is recorded, not run.
+                host_result::ACCEPTED_NOT_EXECUTED
             },
         )
         .map_err(|e| format!("Failed to register execute_action: {}", e))?;
