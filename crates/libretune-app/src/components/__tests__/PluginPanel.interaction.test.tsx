@@ -9,6 +9,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { PluginPanel } from "../PluginPanel";
+import { ToastProvider } from "../../contexts/ToastContext";
 
 /**
  * Manual verification (2026-07-31) that the WASM plugin load -> consent ->
@@ -67,7 +68,11 @@ describe("PluginPanel manual-flow verification", () => {
 
     (open as unknown as any).mockResolvedValue("C:\\fake\\test_plugin.wasm");
 
-    render(<PluginPanel isConnected={true} />);
+    render(
+      <ToastProvider>
+        <PluginPanel isConnected={true} />
+      </ToastProvider>
+    );
 
     // Empty state on mount.
     await screen.findByText("No plugins loaded");
@@ -108,5 +113,38 @@ describe("PluginPanel manual-flow verification", () => {
     await screen.findByText("Last Run Result");
     const resultItem = document.querySelector(".plugin-permission-item");
     expect(resultItem?.textContent).toBe("Set rpmMin = 1234.5");
+  });
+
+  it("shows a visible error toast when the backend rejects the file, instead of failing silently", async () => {
+    // Regression test: manual testing surfaced that loading an invalid file
+    // (e.g. a .txt renamed to .wasm — real wasmtime Module::new() correctly
+    // rejects it) closed the consent dialog with zero on-screen feedback,
+    // only a console.error. Confirms load_wasm_plugin failures now produce
+    // a visible toast.
+    (invoke as unknown as any).mockImplementation((cmd: string) => {
+      if (cmd === "list_wasm_plugins") return Promise.resolve([]);
+      if (cmd === "load_wasm_plugin") {
+        return Promise.reject("Failed to load WASM module: invalid wasm magic number");
+      }
+      return Promise.resolve();
+    });
+    (open as unknown as any).mockResolvedValue("C:\\fake\\not_really_wasm.wasm");
+
+    render(
+      <ToastProvider>
+        <PluginPanel isConnected={true} />
+      </ToastProvider>
+    );
+
+    await screen.findByText("No plugins loaded");
+    fireEvent.click(screen.getByText("+ Load Plugin"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByText("Load Plugin"));
+
+    // Dialog closes either way (matches the existing finally-block
+    // behavior), but now a visible error toast explains why nothing loaded.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await screen.findByText(/Failed to load plugin/i);
+    expect(screen.getByText("No plugins loaded")).toBeInTheDocument();
   });
 });

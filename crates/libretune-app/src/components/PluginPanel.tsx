@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { BookOpen, Pencil, Radio, Zap, ChevronDown, ChevronRight, type LucideIcon } from "lucide-react";
+import { useToast } from "../contexts/ToastContext";
 import "./PluginPanel.css";
 
 interface Plugin {
@@ -33,6 +34,7 @@ interface PluginPanelProps {
 const ALL_PERMISSIONS = ["ReadTables", "WriteConstants", "SubscribeChannels", "ExecuteActions"];
 
 export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
+  const { showToast } = useToast();
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedPlugin, setSelectedPlugin] = useState<string | null>(null);
@@ -78,8 +80,9 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
       }
     } catch (error) {
       console.error("Failed to load plugin:", error);
+      showToast(`Failed to open plugin file: ${error}`, "error");
     }
-  }, []);
+  }, [showToast]);
 
   const togglePendingPermission = useCallback((perm: string) => {
     setConsentedPermissions((prev) => {
@@ -117,14 +120,16 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
         manifestJson: manifest,
         approvedPermissions: approved,
       });
+      showToast(`Loaded plugin "${pendingPlugin.name}"`, "success");
       await loadPlugins();
     } catch (error) {
       console.error("Failed to load plugin:", error);
+      showToast(`Failed to load plugin: ${error}`, "error");
     } finally {
       setPendingPlugin(null);
       setConsentedPermissions(new Set());
     }
-  }, [pendingPlugin, consentedPermissions, loadPlugins]);
+  }, [pendingPlugin, consentedPermissions, loadPlugins, showToast]);
 
   // Unload plugin
   const handleUnloadPlugin = useCallback(
@@ -135,9 +140,10 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
         setSelectedPlugin(null);
       } catch (error) {
         console.error("Failed to unload plugin:", error);
+        showToast(`Failed to unload plugin: ${error}`, "error");
       }
     },
-    [loadPlugins]
+    [loadPlugins, showToast]
   );
 
   // Execute plugin
@@ -148,9 +154,10 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
       await loadPlugins();
     } catch (error) {
       console.error("Failed to execute plugin:", error);
+      showToast(`Failed to execute plugin: ${error}`, "error");
       setLastResult(null);
     }
-  }, [loadPlugins]);
+  }, [loadPlugins, showToast]);
 
   // Get permission display
   const getPermissionDisplay = (perm: string): { label: string; Icon: LucideIcon | null } => {
