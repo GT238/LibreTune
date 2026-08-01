@@ -206,7 +206,11 @@ pub async fn agent_status(app: tauri::AppHandle) -> Result<AgentStatus, String> 
     let s = crate::load_settings(&app);
     // Treat an empty provider as the default ("openai") so the configured-flag
     // isn't falsely false for setups that only set a base URL + key + model.
-    let provider = if s.ai_provider.is_empty() { "openai".to_string() } else { s.ai_provider.clone() };
+    let provider = if s.ai_provider.is_empty() {
+        "openai".to_string()
+    } else {
+        s.ai_provider.clone()
+    };
     Ok(AgentStatus {
         enabled: s.ai_assistant_enabled,
         risk_acknowledged: s.ai_risk_acknowledged,

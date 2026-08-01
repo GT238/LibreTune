@@ -140,7 +140,9 @@ use commands::restore_points::{
     create_restore_point, delete_restore_point, list_restore_points, load_restore_point,
 };
 use commands::save_tune::{save_tune, save_tune_as};
-use commands::settings::{get_settings, update_heatmap_custom_stops, update_setting, update_settings};
+use commands::settings::{
+    get_settings, update_heatmap_custom_stops, update_setting, update_settings,
+};
 use commands::start_autotune::start_autotune;
 use commands::sync_ecu_data::sync_ecu_data;
 use commands::system::{get_build_info, get_serial_ports};

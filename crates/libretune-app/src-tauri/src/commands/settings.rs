@@ -62,7 +62,11 @@ fn apply_setting(settings: &mut Settings, key: &str, value: &str) -> Result<(), 
             settings.runtime_packet_mode = value.to_string();
         }
         "last_serial_port" => {
-            settings.last_serial_port = if value.is_empty() { None } else { Some(value.to_string()) }
+            settings.last_serial_port = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
         }
         "auto_reconnect_after_controller_command" => {
             settings.auto_reconnect_after_controller_command =
@@ -89,10 +93,18 @@ fn apply_setting(settings: &mut Settings, key: &str, value: &str) -> Result<(), 
         }
         // Session persistence
         "last_project_path" => {
-            settings.last_project_path = if value.is_empty() { None } else { Some(value.to_string()) }
+            settings.last_project_path = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
         }
         "last_active_tab" => {
-            settings.last_active_tab = if value.is_empty() { None } else { Some(value.to_string()) }
+            settings.last_active_tab = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
         }
         // UI layout state.
         "sidebar_visible" => {
@@ -102,16 +114,34 @@ fn apply_setting(settings: &mut Settings, key: &str, value: &str) -> Result<(), 
             settings.agent_panel_visible = value.parse().map_err(|_| "Invalid boolean value")?
         }
         "sidebar_expanded_ids" => {
-            settings.sidebar_expanded_ids = if value.is_empty() { None } else { Some(value.to_string()) }
+            settings.sidebar_expanded_ids = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
         }
         "selected_dashboard" => {
-            settings.selected_dashboard = if value.is_empty() { None } else { Some(value.to_string()) }
+            settings.selected_dashboard = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
         }
         "open_tabs" => {
             // Store the JSON blob as-is; the frontend parses it.
-            settings.open_tabs = if value.is_empty() { None } else { Some(value.to_string()) }
+            settings.open_tabs = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
         }
-        "language" => settings.language = if value.is_empty() { None } else { Some(value.to_string()) },
+        "language" => {
+            settings.language = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
 
         // --- AI Assistant settings (all keys must have arms; see repo memory
         // about the latent auto_commit_on_save bug). ---
