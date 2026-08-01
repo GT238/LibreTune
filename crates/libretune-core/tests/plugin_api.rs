@@ -29,6 +29,30 @@ fn create_test_context() -> PluginApiContext {
     PluginApiContext::new(manager)
 }
 
+/// A snapshot with one table, one scalar constant, and one channel, for
+/// tests that need to exercise the "permission granted and data present"
+/// success path rather than just the permission gate.
+fn test_snapshot() -> PluginDataSnapshot {
+    let mut tables = std::collections::HashMap::new();
+    tables.insert(
+        "veTable1".to_string(),
+        TableSnapshot {
+            x_bins: vec![0.0, 1.0],
+            y_bins: vec![0.0],
+            z_values: vec![vec![12.3, 45.6]],
+        },
+    );
+    let mut constants = std::collections::HashMap::new();
+    constants.insert("rpmMin".to_string(), 400.0);
+    let mut channels = std::collections::HashMap::new();
+    channels.insert("RPM".to_string(), 850.0);
+    PluginDataSnapshot {
+        tables,
+        constants,
+        channels,
+    }
+}
+
 #[test]
 fn test_api_response_serialization() {
     let resp = ApiResponse::ok(vec![1, 2, 3, 4]);
@@ -60,14 +84,20 @@ fn test_api_context_initialization() {
 #[test]
 fn test_api_get_table_data_permission_check() {
     // No permissions granted: must be rejected before any table data is read.
-    let resp = api_get_table_data(&[], "veTable1", 0, 0);
+    let resp = api_get_table_data(&[], &test_snapshot(), "veTable1", 0, 0);
     assert!(!resp.success);
     assert!(resp.error.contains("Permission"));
 }
 
 #[test]
 fn test_api_get_table_data_granted() {
-    let resp = api_get_table_data(&[Permission::ReadTables], "veTable1", 0, 0);
+    let resp = api_get_table_data(
+        &[Permission::ReadTables],
+        &test_snapshot(),
+        "veTable1",
+        0,
+        0,
+    );
     assert!(resp.success);
 }
 
@@ -75,7 +105,7 @@ fn test_api_get_table_data_granted() {
 fn test_api_get_constant_permission_check() {
     // Constants are covered by ReadTables (see api_get_constant docs); no
     // grant means the call must be rejected.
-    let resp = api_get_constant(&[], "rpmMin");
+    let resp = api_get_constant(&[], &test_snapshot(), "rpmMin");
     assert!(!resp.success);
 }
 
@@ -98,15 +128,15 @@ fn test_api_set_constant_granted() {
 fn test_api_subscribe_channel_permission_check() {
     // No SubscribeChannels grant: cannot register a realtime subscription and
     // must be rejected up front.
-    let resp = api_subscribe_channel(&[], "RPM");
+    let resp = api_subscribe_channel(&[], &test_snapshot(), "RPM");
     assert!(!resp.success);
 }
 
 #[test]
 fn test_api_get_channel_value_permission_check() {
     // Reading a subscribed channel value re-checks SubscribeChannels, so even
-    // a guessed channel_id (42) must be rejected without the grant.
-    let resp = api_get_channel_value(&[], 42);
+    // a channel that exists in the snapshot must be rejected without the grant.
+    let resp = api_get_channel_value(&[], &test_snapshot(), "RPM");
     assert!(!resp.success);
 }
 
@@ -240,8 +270,8 @@ fn test_api_permission_enforcement_consistency() {
     // Denial must be uniform across calls: an empty grant set is rejected
     // regardless of which table/cell it targets, confirming the guard is
     // keyed on the permission set and not on the specific request.
-    let resp1 = api_get_table_data(&[], "table1", 0, 0);
-    let resp2 = api_get_table_data(&[], "table2", 5, 5);
+    let resp1 = api_get_table_data(&[], &test_snapshot(), "table1", 0, 0);
+    let resp2 = api_get_table_data(&[], &test_snapshot(), "table2", 5, 5);
 
     assert!(!resp1.success);
     assert!(!resp2.success);

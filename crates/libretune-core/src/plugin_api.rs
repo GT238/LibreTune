@@ -8,8 +8,13 @@
 //!
 //! All functions validate plugin permissions before executing.
 
-use crate::plugin_system::{Permission, PluginManager};
+use crate::plugin_system::{Permission, PluginDataSnapshot, PluginManager};
 use std::sync::Mutex;
+
+/// Prefix shared by every [`ApiResponse::permission_denied`] error, so
+/// callers can distinguish "denied" from "not found"/other failures without
+/// a separate status enum.
+const PERMISSION_DENIED_PREFIX: &str = "Permission denied: ";
 
 /// Plugin API context shared with WASM host functions.
 pub struct PluginApiContext {
@@ -70,8 +75,17 @@ impl ApiResponse {
         ApiResponse {
             success: false,
             data: Vec::new(),
-            error: format!("Permission denied: {}", perm_name),
+            error: format!("{}{}", PERMISSION_DENIED_PREFIX, perm_name),
         }
+    }
+
+    /// Whether this failure was specifically a permission denial, as opposed
+    /// to e.g. "table not found" or "cell out of range". Callers that need
+    /// to map an `ApiResponse` back to a distinct wire-level error code (see
+    /// `plugin_system::host_result`) use this instead of matching on the
+    /// error string directly.
+    pub fn is_permission_denied(&self) -> bool {
+        !self.success && self.error.starts_with(PERMISSION_DENIED_PREFIX)
     }
 }
 
@@ -156,24 +170,41 @@ impl PluginLogMessage {
 ///
 /// # Arguments
 /// * `granted` - Permissions granted to the calling plugin instance
+/// * `snapshot` - Read-only tune/table data captured for this execute() run
 /// * `table_name` - Name of table to read
-/// * `row`, `col` - Cell coordinates (-1 for header)
+/// * `row`, `col` - Zero-based cell coordinates into the table's z-values grid
 ///
 /// # Returns
-/// ApiResponse with value as bytes or error
+/// ApiResponse with the cell's value as little-endian f32 bytes, or an error
+/// if the permission is missing, the table isn't in the snapshot, or the
+/// coordinates are out of range.
 pub fn api_get_table_data(
     granted: &[Permission],
-    _table_name: &str,
-    _row: i32,
-    _col: i32,
+    snapshot: &PluginDataSnapshot,
+    table_name: &str,
+    row: i32,
+    col: i32,
 ) -> ApiResponse {
     if !granted.contains(&Permission::ReadTables) {
         return ApiResponse::permission_denied("ReadTables");
     }
-
-    // Implementation would fetch from ECU memory model
-    // For now, return placeholder response
-    ApiResponse::ok(vec![0u8; 4]) // 4 bytes for f32 value
+    let Some(table) = snapshot.tables.get(table_name) else {
+        return ApiResponse::error(format!("table '{}' not found", table_name));
+    };
+    if row < 0 || col < 0 {
+        return ApiResponse::error("row/col must be non-negative");
+    }
+    match table
+        .z_values
+        .get(row as usize)
+        .and_then(|r| r.get(col as usize))
+    {
+        Some(value) => ApiResponse::ok((*value as f32).to_le_bytes().to_vec()),
+        None => ApiResponse::error(format!(
+            "cell ({}, {}) out of range for table '{}'",
+            row, col, table_name
+        )),
+    }
 }
 
 /// Host function: Get constant value.
@@ -183,17 +214,26 @@ pub fn api_get_table_data(
 ///
 /// # Arguments
 /// * `granted` - Permissions granted to the calling plugin instance
+/// * `snapshot` - Read-only tune/table data captured for this execute() run
 /// * `constant_name` - Name of constant
 ///
 /// # Returns
-/// ApiResponse with value as bytes or error
-pub fn api_get_constant(granted: &[Permission], _constant_name: &str) -> ApiResponse {
+/// ApiResponse with the constant's scalar value as little-endian f32 bytes,
+/// or an error if the permission is missing or the constant isn't a known
+/// scalar in the snapshot (array-shaped constants, e.g. axis bins, aren't
+/// exposed here — read them via the owning table instead).
+pub fn api_get_constant(
+    granted: &[Permission],
+    snapshot: &PluginDataSnapshot,
+    constant_name: &str,
+) -> ApiResponse {
     if !granted.contains(&Permission::ReadTables) {
         return ApiResponse::permission_denied("ReadTables");
     }
-
-    // Implementation would fetch from tune cache
-    ApiResponse::ok(vec![0u8; 4]) // 4 bytes for value
+    match snapshot.constants.get(constant_name) {
+        Some(value) => ApiResponse::ok((*value as f32).to_le_bytes().to_vec()),
+        None => ApiResponse::error(format!("constant '{}' not found", constant_name)),
+    }
 }
 
 /// Host function: Set constant value.
@@ -228,38 +268,55 @@ pub fn api_set_constant(
 ///
 /// # Arguments
 /// * `granted` - Permissions granted to the calling plugin instance
+/// * `snapshot` - Read-only channel data captured for this execute() run
 /// * `channel_name` - Name of channel (e.g., "RPM", "AFR")
 ///
 /// # Returns
-/// ApiResponse with channel ID or error
-pub fn api_subscribe_channel(granted: &[Permission], _channel_name: &str) -> ApiResponse {
+/// Success if the permission is held and the channel exists in the
+/// snapshot (id assignment is the caller's responsibility — see
+/// `plugin_system`'s per-instance `subscribed_channels` list).
+pub fn api_subscribe_channel(
+    granted: &[Permission],
+    snapshot: &PluginDataSnapshot,
+    channel_name: &str,
+) -> ApiResponse {
     if !granted.contains(&Permission::SubscribeChannels) {
         return ApiResponse::permission_denied("SubscribeChannels");
     }
-
-    // Implementation would register channel subscription
-    // Return channel ID as bytes
-    ApiResponse::ok(vec![0u8; 4]) // Channel ID
+    if snapshot.channels.contains_key(channel_name) {
+        ApiResponse::ok_empty()
+    } else {
+        ApiResponse::error(format!("channel '{}' not found", channel_name))
+    }
 }
 
-/// Host function: Get realtime value for subscribed channel.
+/// Host function: Get realtime value for a subscribed channel.
 ///
 /// # Permissions
 /// Requires `SubscribeChannels` permission.
 ///
 /// # Arguments
 /// * `granted` - Permissions granted to the calling plugin instance
-/// * `channel_id` - ID from subscribe call
+/// * `snapshot` - Read-only channel data captured for this execute() run
+/// * `channel_name` - Name resolved by the caller from the id passed to
+///   `subscribe_channel`
 ///
 /// # Returns
-/// ApiResponse with current value or error
-pub fn api_get_channel_value(granted: &[Permission], _channel_id: u32) -> ApiResponse {
+/// ApiResponse with the channel's current value as little-endian f32 bytes,
+/// or an error if the permission is missing or the channel has no value in
+/// this snapshot (e.g. not connected to an ECU).
+pub fn api_get_channel_value(
+    granted: &[Permission],
+    snapshot: &PluginDataSnapshot,
+    channel_name: &str,
+) -> ApiResponse {
     if !granted.contains(&Permission::SubscribeChannels) {
         return ApiResponse::permission_denied("SubscribeChannels");
     }
-
-    // Implementation would fetch current value
-    ApiResponse::ok(vec![0u8; 4]) // f32 value as bytes
+    match snapshot.channels.get(channel_name) {
+        Some(value) => ApiResponse::ok((*value as f32).to_le_bytes().to_vec()),
+        None => ApiResponse::error(format!("channel '{}' has no current value", channel_name)),
+    }
 }
 
 /// Host function: Execute action sequence.
@@ -355,6 +412,29 @@ mod tests {
         PluginApiContext::new(manager)
     }
 
+    /// A snapshot with one table, one scalar constant, and one channel —
+    /// enough to exercise both the "found" and "not found" paths.
+    fn test_snapshot() -> PluginDataSnapshot {
+        let mut tables = std::collections::HashMap::new();
+        tables.insert(
+            "veTable1".to_string(),
+            crate::plugin_system::TableSnapshot {
+                x_bins: vec![0.0, 1.0],
+                y_bins: vec![0.0],
+                z_values: vec![vec![12.3, 45.6]],
+            },
+        );
+        let mut constants = std::collections::HashMap::new();
+        constants.insert("rpm".to_string(), 850.0);
+        let mut channels = std::collections::HashMap::new();
+        channels.insert("RPM".to_string(), 850.0);
+        PluginDataSnapshot {
+            tables,
+            constants,
+            channels,
+        }
+    }
+
     #[test]
     fn test_api_response_ok() {
         let resp = ApiResponse::ok(vec![1, 2, 3]);
@@ -427,28 +507,65 @@ mod tests {
 
     #[test]
     fn test_api_get_table_data_no_permission() {
-        let resp = api_get_table_data(&[], "veTable1", 0, 0);
+        let resp = api_get_table_data(&[], &test_snapshot(), "veTable1", 0, 0);
         assert!(!resp.success);
-        assert!(resp.error.contains("Permission denied"));
+        assert!(resp.is_permission_denied());
     }
 
     #[test]
     fn test_api_get_table_data_with_permission() {
-        let resp = api_get_table_data(&[Permission::ReadTables], "veTable1", 0, 0);
+        let resp = api_get_table_data(
+            &[Permission::ReadTables],
+            &test_snapshot(),
+            "veTable1",
+            0,
+            0,
+        );
         assert!(resp.success);
         assert_eq!(resp.data.len(), 4);
+        assert_eq!(f32::from_le_bytes(resp.data.try_into().unwrap()), 12.3f32);
+    }
+
+    #[test]
+    fn test_api_get_table_data_unknown_table() {
+        // Permission granted, but the table isn't in the snapshot — a
+        // distinct failure from permission denial.
+        let resp = api_get_table_data(&[Permission::ReadTables], &test_snapshot(), "nope", 0, 0);
+        assert!(!resp.success);
+        assert!(!resp.is_permission_denied());
+    }
+
+    #[test]
+    fn test_api_get_table_data_cell_out_of_range() {
+        let resp = api_get_table_data(
+            &[Permission::ReadTables],
+            &test_snapshot(),
+            "veTable1",
+            99,
+            99,
+        );
+        assert!(!resp.success);
+        assert!(!resp.is_permission_denied());
     }
 
     #[test]
     fn test_api_get_constant_no_permission() {
-        let resp = api_get_constant(&[], "rpm");
+        let resp = api_get_constant(&[], &test_snapshot(), "rpm");
         assert!(!resp.success);
     }
 
     #[test]
     fn test_api_get_constant_with_permission() {
-        let resp = api_get_constant(&[Permission::ReadTables], "rpm");
+        let resp = api_get_constant(&[Permission::ReadTables], &test_snapshot(), "rpm");
         assert!(resp.success);
+        assert_eq!(f32::from_le_bytes(resp.data.try_into().unwrap()), 850.0f32);
+    }
+
+    #[test]
+    fn test_api_get_constant_unknown() {
+        let resp = api_get_constant(&[Permission::ReadTables], &test_snapshot(), "nope");
+        assert!(!resp.success);
+        assert!(!resp.is_permission_denied());
     }
 
     #[test]
@@ -472,26 +589,35 @@ mod tests {
 
     #[test]
     fn test_api_subscribe_channel_no_permission() {
-        let resp = api_subscribe_channel(&[], "RPM");
+        let resp = api_subscribe_channel(&[], &test_snapshot(), "RPM");
         assert!(!resp.success);
     }
 
     #[test]
     fn test_api_subscribe_channel_with_permission() {
-        let resp = api_subscribe_channel(&[Permission::SubscribeChannels], "RPM");
+        let resp = api_subscribe_channel(&[Permission::SubscribeChannels], &test_snapshot(), "RPM");
         assert!(resp.success);
     }
 
     #[test]
+    fn test_api_subscribe_channel_unknown() {
+        let resp =
+            api_subscribe_channel(&[Permission::SubscribeChannels], &test_snapshot(), "nope");
+        assert!(!resp.success);
+        assert!(!resp.is_permission_denied());
+    }
+
+    #[test]
     fn test_api_get_channel_value_no_permission() {
-        let resp = api_get_channel_value(&[], 0);
+        let resp = api_get_channel_value(&[], &test_snapshot(), "RPM");
         assert!(!resp.success);
     }
 
     #[test]
     fn test_api_get_channel_value_with_permission() {
-        let resp = api_get_channel_value(&[Permission::SubscribeChannels], 0);
+        let resp = api_get_channel_value(&[Permission::SubscribeChannels], &test_snapshot(), "RPM");
         assert!(resp.success);
+        assert_eq!(f32::from_le_bytes(resp.data.try_into().unwrap()), 850.0f32);
     }
 
     #[test]

@@ -41,6 +41,79 @@ mod host_result {
     pub const PERMISSION_DENIED: i32 = -1;
     /// Guest pointer/length was invalid (OOB, bad UTF-8, no memory export).
     pub const INVALID_ARGS: i32 = -2;
+    /// Permission was held, but the requested table/constant/channel/id
+    /// doesn't exist in this run's data snapshot.
+    pub const NOT_FOUND: i32 = -3;
+}
+
+/// A single table's current axis bins and cell values, captured for one
+/// plugin `execute()` call. Mirrors the shape the table editors already work
+/// with (`z_values[row][col]`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TableSnapshot {
+    pub x_bins: Vec<f64>,
+    pub y_bins: Vec<f64>,
+    pub z_values: Vec<Vec<f64>>,
+}
+
+/// Read-only snapshot of tune/table/channel data made available to a plugin
+/// for the duration of one [`PluginInstance::execute`] call.
+///
+/// WASM host functions are registered as plain synchronous closures
+/// (`wasmtime::Linker::func_wrap`), but the real data lives behind
+/// `tokio::sync::Mutex`es in the Tauri app's `AppState`, only lockable via
+/// `.await`. A sync closure can't await, so the caller (the `execute_wasm_plugin`
+/// Tauri command) builds this snapshot *before* calling `execute()`,
+/// following the app's established lock order, and every host function reads
+/// from this owned, lock-free copy instead of reaching back into `AppState`.
+/// This means a plugin sees a consistent-but-possibly-stale view of the tune
+/// as of when it started running, never a live one — see [`PluginProposal`]
+/// for how writes work under the same constraint.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PluginDataSnapshot {
+    /// Table name -> current bins/values.
+    pub tables: HashMap<String, TableSnapshot>,
+    /// Scalar constant name -> current value. Array-shaped constants (e.g.
+    /// axis bins) aren't included here; read them via their owning table.
+    pub constants: HashMap<String, f64>,
+    /// Realtime channel name -> current value, if connected. Empty when not
+    /// connected to an ECU.
+    pub channels: HashMap<String, f64>,
+}
+
+/// A write a plugin asked for during one `execute()` call. Collected instead
+/// of applied immediately (again: no `.await` available inside the sync
+/// closure that recorded it), then applied afterward by
+/// `execute_wasm_plugin`, async, through the exact same code path a
+/// user-driven edit takes — so it gets the same tune-cache/ECU write and
+/// lock-ordering behavior as everything else. The plugin's own load-time
+/// permission grant is what authorizes this; there is no separate per-write
+/// approval prompt (WASM execution is synchronous end-to-end, so nothing can
+/// block mid-run on a UI click).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PluginProposal {
+    SetConstant {
+        name: String,
+        value: f64,
+    },
+    /// Not yet auto-applied: LibreTune's action-scripting engine
+    /// (`action_scripting::Action`) is validation-only today, with no
+    /// generic "execute this one action now" dispatcher to call into. The
+    /// raw JSON is surfaced back to the caller as an unapplied proposal
+    /// rather than silently dropped or half-implemented.
+    ExecuteAction {
+        action_json: String,
+    },
+}
+
+/// Result of one [`PluginInstance::execute`] call.
+#[derive(Debug, Clone)]
+pub struct PluginExecutionResult {
+    pub exec_count: u64,
+    /// The `plugin_execute` export's own return value, if it exported one.
+    pub result_code: Option<i32>,
+    /// Writes/actions the plugin asked for during this run, in call order.
+    pub proposals: Vec<PluginProposal>,
 }
 
 /// Per-instance state attached to the plugin's [`wasmtime::Store`]. This is
@@ -51,6 +124,14 @@ mod host_result {
 struct PluginHostState {
     plugin_name: String,
     permissions: Vec<Permission>,
+    /// Refreshed at the start of every `execute()` call.
+    snapshot: PluginDataSnapshot,
+    /// Drained into the [`PluginExecutionResult`] at the end of `execute()`.
+    proposals: Vec<PluginProposal>,
+    /// Channel names the guest has subscribed to this run, indexed by the id
+    /// `subscribe_channel` handed back — `get_channel_value` resolves ids
+    /// through this rather than trusting a guest-supplied name directly.
+    subscribed_channels: Vec<String>,
 }
 
 /// Fetch the guest's exported linear memory, or an [`host_result::INVALID_ARGS`] error.
@@ -93,6 +174,16 @@ fn write_guest_bytes(
     memory
         .write(&mut *caller, ptr as usize, data)
         .map_err(|_| host_result::INVALID_ARGS)
+}
+
+/// Map a failed [`plugin_api::ApiResponse`] to the right wire-level code:
+/// permission denial vs. "not found in this run's snapshot".
+fn response_failure_code(resp: &plugin_api::ApiResponse) -> i32 {
+    if resp.is_permission_denied() {
+        host_result::PERMISSION_DENIED
+    } else {
+        host_result::NOT_FOUND
+    }
 }
 
 /// Register every host function a plugin may import under the `"env"`
@@ -140,10 +231,18 @@ fn register_host_functions(linker: &mut Linker<PluginHostState>) -> Result<(), S
                     Ok(s) => s,
                     Err(code) => return code,
                 };
-                let permissions = caller.data().permissions.clone();
-                let resp = plugin_api::api_get_table_data(&permissions, &table_name, row, col);
+                let resp = {
+                    let host = caller.data();
+                    plugin_api::api_get_table_data(
+                        &host.permissions,
+                        &host.snapshot,
+                        &table_name,
+                        row,
+                        col,
+                    )
+                };
                 if !resp.success {
-                    return host_result::PERMISSION_DENIED;
+                    return response_failure_code(&resp);
                 }
                 match write_guest_bytes(&mut caller, out_ptr, &resp.data) {
                     Ok(()) => host_result::OK,
@@ -166,10 +265,12 @@ fn register_host_functions(linker: &mut Linker<PluginHostState>) -> Result<(), S
                     Ok(s) => s,
                     Err(code) => return code,
                 };
-                let permissions = caller.data().permissions.clone();
-                let resp = plugin_api::api_get_constant(&permissions, &name);
+                let resp = {
+                    let host = caller.data();
+                    plugin_api::api_get_constant(&host.permissions, &host.snapshot, &name)
+                };
                 if !resp.success {
-                    return host_result::PERMISSION_DENIED;
+                    return response_failure_code(&resp);
                 }
                 match write_guest_bytes(&mut caller, out_ptr, &resp.data) {
                     Ok(()) => host_result::OK,
@@ -192,13 +293,21 @@ fn register_host_functions(linker: &mut Linker<PluginHostState>) -> Result<(), S
                     Ok(s) => s,
                     Err(code) => return code,
                 };
-                let permissions = caller.data().permissions.clone();
-                let resp = plugin_api::api_set_constant(&permissions, &name, &value.to_le_bytes());
-                if resp.success {
-                    host_result::OK
-                } else {
-                    host_result::PERMISSION_DENIED
+                let resp = {
+                    let host = caller.data();
+                    plugin_api::api_set_constant(&host.permissions, &name, &value.to_le_bytes())
+                };
+                if !resp.success {
+                    return host_result::PERMISSION_DENIED;
                 }
+                caller
+                    .data_mut()
+                    .proposals
+                    .push(PluginProposal::SetConstant {
+                        name,
+                        value: value as f64,
+                    });
+                host_result::OK
             },
         )
         .map_err(|e| format!("Failed to register set_constant: {}", e))?;
@@ -216,12 +325,17 @@ fn register_host_functions(linker: &mut Linker<PluginHostState>) -> Result<(), S
                     Ok(s) => s,
                     Err(code) => return code,
                 };
-                let permissions = caller.data().permissions.clone();
-                let resp = plugin_api::api_subscribe_channel(&permissions, &name);
+                let resp = {
+                    let host = caller.data();
+                    plugin_api::api_subscribe_channel(&host.permissions, &host.snapshot, &name)
+                };
                 if !resp.success {
-                    return host_result::PERMISSION_DENIED;
+                    return response_failure_code(&resp);
                 }
-                match write_guest_bytes(&mut caller, out_ptr, &resp.data) {
+                let host = caller.data_mut();
+                let channel_id = host.subscribed_channels.len() as i32;
+                host.subscribed_channels.push(name);
+                match write_guest_bytes(&mut caller, out_ptr, &channel_id.to_le_bytes()) {
                     Ok(()) => host_result::OK,
                     Err(code) => code,
                 }
@@ -237,10 +351,18 @@ fn register_host_functions(linker: &mut Linker<PluginHostState>) -> Result<(), S
                 if channel_id < 0 {
                     return host_result::INVALID_ARGS;
                 }
-                let permissions = caller.data().permissions.clone();
-                let resp = plugin_api::api_get_channel_value(&permissions, channel_id as u32);
+                let resp = {
+                    let host = caller.data();
+                    // Only a name this instance itself got back from
+                    // subscribe_channel is ever looked up — a guest can't
+                    // forge a subscription by guessing an id.
+                    let Some(name) = host.subscribed_channels.get(channel_id as usize) else {
+                        return host_result::INVALID_ARGS;
+                    };
+                    plugin_api::api_get_channel_value(&host.permissions, &host.snapshot, name)
+                };
                 if !resp.success {
-                    return host_result::PERMISSION_DENIED;
+                    return response_failure_code(&resp);
                 }
                 match write_guest_bytes(&mut caller, out_ptr, &resp.data) {
                     Ok(()) => host_result::OK,
@@ -259,13 +381,18 @@ fn register_host_functions(linker: &mut Linker<PluginHostState>) -> Result<(), S
                     Ok(s) => s,
                     Err(code) => return code,
                 };
-                let permissions = caller.data().permissions.clone();
-                let resp = plugin_api::api_execute_action(&permissions, &action_json);
-                if resp.success {
-                    host_result::OK
-                } else {
-                    host_result::PERMISSION_DENIED
+                let resp = {
+                    let host = caller.data();
+                    plugin_api::api_execute_action(&host.permissions, &action_json)
+                };
+                if !resp.success {
+                    return host_result::PERMISSION_DENIED;
                 }
+                caller
+                    .data_mut()
+                    .proposals
+                    .push(PluginProposal::ExecuteAction { action_json });
+                host_result::OK
             },
         )
         .map_err(|e| format!("Failed to register execute_action: {}", e))?;
@@ -393,6 +520,9 @@ impl PluginInstance {
         let host_state = PluginHostState {
             plugin_name: manifest.name.clone(),
             permissions: granted.clone(),
+            snapshot: PluginDataSnapshot::default(),
+            proposals: Vec::new(),
+            subscribed_channels: Vec::new(),
         };
         let mut store = Store::new(&engine, host_state);
         let mut linker: Linker<PluginHostState> = Linker::new(&engine);
@@ -483,8 +613,14 @@ impl PluginInstance {
         Ok(buf)
     }
 
-    /// Execute plugin function, returning execution count.
-    pub fn execute(&mut self) -> Result<u64, String> {
+    /// Execute the plugin's `plugin_execute()` export against a fresh data
+    /// snapshot, returning what it read as available and what it asked to
+    /// change. See [`PluginDataSnapshot`]/[`PluginProposal`] for why this
+    /// takes a snapshot rather than reaching into live state directly.
+    pub fn execute(
+        &mut self,
+        snapshot: PluginDataSnapshot,
+    ) -> Result<PluginExecutionResult, String> {
         if self.state != PluginState::Ready && self.state != PluginState::Running {
             return Err(format!("Cannot execute plugin in {:?} state", self.state));
         }
@@ -492,18 +628,31 @@ impl PluginInstance {
         self.state = PluginState::Running;
         self.exec_count += 1;
 
-        // Call plugin_execute() if exported
+        {
+            let host = self.store.data_mut();
+            host.snapshot = snapshot;
+            host.proposals.clear();
+            host.subscribed_channels.clear();
+        }
+
+        let mut result_code = None;
         if let Ok(exec) = self
             .instance
             .get_typed_func::<(), i32>(&mut self.store, "plugin_execute")
         {
-            let _result = exec
-                .call(&mut self.store, ())
-                .map_err(|e| format!("Plugin execution failed: {}", e))?;
+            result_code = Some(
+                exec.call(&mut self.store, ())
+                    .map_err(|e| format!("Plugin execution failed: {}", e))?,
+            );
         }
 
         self.state = PluginState::Ready;
-        Ok(self.exec_count)
+        let proposals = std::mem::take(&mut self.store.data_mut().proposals);
+        Ok(PluginExecutionResult {
+            exec_count: self.exec_count,
+            result_code,
+            proposals,
+        })
     }
 
     /// Unload plugin and release WASM resources.
@@ -600,12 +749,16 @@ impl PluginManager {
         self.plugins.get_mut(name)
     }
 
-    /// Execute a plugin by name.
-    pub fn execute_plugin(&mut self, name: &str) -> Result<u64, String> {
+    /// Execute a plugin by name against a fresh data snapshot.
+    pub fn execute_plugin(
+        &mut self,
+        name: &str,
+        snapshot: PluginDataSnapshot,
+    ) -> Result<PluginExecutionResult, String> {
         self.plugins
             .get_mut(name)
             .ok_or_else(|| format!("Plugin '{}' not found", name))?
-            .execute()
+            .execute(snapshot)
     }
 
     /// Unload plugin by name.

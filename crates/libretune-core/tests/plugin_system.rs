@@ -367,6 +367,31 @@ fn manifest_requesting(permissions: Vec<Permission>) -> PluginManifest {
     }
 }
 
+fn snapshot_with_constant(name: &str, value: f64) -> PluginDataSnapshot {
+    let mut snapshot = PluginDataSnapshot::default();
+    snapshot.constants.insert(name.to_string(), value);
+    snapshot
+}
+
+fn snapshot_with_channel(name: &str, value: f64) -> PluginDataSnapshot {
+    let mut snapshot = PluginDataSnapshot::default();
+    snapshot.channels.insert(name.to_string(), value);
+    snapshot
+}
+
+fn snapshot_with_table(name: &str, z_values: Vec<Vec<f64>>) -> PluginDataSnapshot {
+    let mut snapshot = PluginDataSnapshot::default();
+    snapshot.tables.insert(
+        name.to_string(),
+        TableSnapshot {
+            x_bins: vec![],
+            y_bins: vec![],
+            z_values,
+        },
+    );
+    snapshot
+}
+
 #[test]
 fn log_message_requires_no_permission_and_reaches_the_host() {
     // "hello from plugin" is 17 bytes, written at offset 0 via the data segment.
@@ -414,7 +439,7 @@ fn get_constant_denied_without_read_tables_permission() {
 }
 
 #[test]
-fn get_constant_succeeds_and_writes_result_when_approved() {
+fn get_constant_succeeds_and_writes_real_value_when_approved() {
     let wat = r#"
         (module
             (import "env" "get_constant" (func $get_constant (param i32 i32 i32) (result i32)))
@@ -431,14 +456,201 @@ fn get_constant_succeeds_and_writes_result_when_approved() {
         &[Permission::ReadTables],
     );
     let result = instance
-        .call_i32_export("plugin_execute")
-        .expect("call failed");
-    assert_eq!(result, 0, "expected OK once ReadTables is approved");
+        .execute(snapshot_with_constant("rpm", 850.0))
+        .expect("execute failed");
+    assert_eq!(
+        result.result_code,
+        Some(0),
+        "expected OK once ReadTables is approved and 'rpm' is in the snapshot"
+    );
+    assert!(
+        result.proposals.is_empty(),
+        "a read must not record a proposal"
+    );
 
-    // The host function must have written its 4-byte placeholder value at
-    // the out_ptr the guest supplied (offset 100).
+    // The host function must have written the real value at the out_ptr the
+    // guest supplied (offset 100), not a placeholder.
     let written = instance.read_memory(100, 4).expect("memory read failed");
-    assert_eq!(written.len(), 4);
+    let value = f32::from_le_bytes(written.try_into().unwrap());
+    assert_eq!(value, 850.0);
+}
+
+#[test]
+fn get_constant_not_found_when_missing_from_snapshot() {
+    // Permission granted, but 'rpm' isn't present in this run's data —
+    // distinct from a permission denial (-1).
+    let wat = r#"
+        (module
+            (import "env" "get_constant" (func $get_constant (param i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "rpm")
+            (func (export "plugin_execute") (result i32)
+                (call $get_constant (i32.const 0) (i32.const 3) (i32.const 100))
+            )
+        )
+    "#;
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![Permission::ReadTables]),
+        &[Permission::ReadTables],
+    );
+    let result = instance
+        .execute(PluginDataSnapshot::default())
+        .expect("execute failed");
+    assert_eq!(result.result_code, Some(-3), "expected NOT_FOUND");
+}
+
+#[test]
+fn get_table_data_returns_real_cell_value() {
+    let wat = r#"
+        (module
+            (import "env" "get_table_data" (func $get_table_data (param i32 i32 i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "veTable1")
+            (func (export "plugin_execute") (result i32)
+                (call $get_table_data (i32.const 0) (i32.const 8) (i32.const 1) (i32.const 2) (i32.const 100))
+            )
+        )
+    "#;
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![Permission::ReadTables]),
+        &[Permission::ReadTables],
+    );
+    let snapshot = snapshot_with_table("veTable1", vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]]);
+    let result = instance.execute(snapshot).expect("execute failed");
+    assert_eq!(result.result_code, Some(0));
+
+    // Cell (row=1, col=2) of [[1,2,3],[4,5,6]] is 6.0.
+    let written = instance.read_memory(100, 4).expect("memory read failed");
+    let value = f32::from_le_bytes(written.try_into().unwrap());
+    assert_eq!(value, 6.0);
+}
+
+#[test]
+fn get_table_data_cell_out_of_range_is_not_found() {
+    let wat = r#"
+        (module
+            (import "env" "get_table_data" (func $get_table_data (param i32 i32 i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "veTable1")
+            (func (export "plugin_execute") (result i32)
+                (call $get_table_data (i32.const 0) (i32.const 8) (i32.const 99) (i32.const 99) (i32.const 100))
+            )
+        )
+    "#;
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![Permission::ReadTables]),
+        &[Permission::ReadTables],
+    );
+    let snapshot = snapshot_with_table("veTable1", vec![vec![1.0]]);
+    let result = instance.execute(snapshot).expect("execute failed");
+    assert_eq!(result.result_code, Some(-3));
+}
+
+#[test]
+fn set_constant_records_a_proposal_instead_of_writing_directly() {
+    let wat = r#"
+        (module
+            (import "env" "set_constant" (func $set_constant (param i32 i32 f32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "rpmMin")
+            (func (export "plugin_execute") (result i32)
+                (call $set_constant (i32.const 0) (i32.const 6) (f32.const 1234.5))
+            )
+        )
+    "#;
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![Permission::WriteConstants]),
+        &[Permission::WriteConstants],
+    );
+    let result = instance
+        .execute(PluginDataSnapshot::default())
+        .expect("execute failed");
+    assert_eq!(result.result_code, Some(0));
+    assert_eq!(
+        result.proposals,
+        vec![PluginProposal::SetConstant {
+            name: "rpmMin".to_string(),
+            value: 1234.5f32 as f64,
+        }],
+        "the write must be staged as a proposal, not applied inside the sandbox"
+    );
+}
+
+#[test]
+fn execute_action_records_an_unapplied_proposal() {
+    let wat = r#"
+        (module
+            (import "env" "execute_action" (func $execute_action (param i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "{\"type\":\"pause\"}")
+            (func (export "plugin_execute") (result i32)
+                (call $execute_action (i32.const 0) (i32.const 16))
+            )
+        )
+    "#;
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![Permission::ExecuteActions]),
+        &[Permission::ExecuteActions],
+    );
+    let result = instance
+        .execute(PluginDataSnapshot::default())
+        .expect("execute failed");
+    assert_eq!(result.result_code, Some(0));
+    assert_eq!(
+        result.proposals,
+        vec![PluginProposal::ExecuteAction {
+            action_json: "{\"type\":\"pause\"}".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn proposals_and_snapshot_do_not_leak_across_separate_execute_calls() {
+    let wat = r#"
+        (module
+            (import "env" "set_constant" (func $set_constant (param i32 i32 f32) (result i32)))
+            (import "env" "get_constant" (func $get_constant (param i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "rpm")
+            (func (export "plugin_execute") (result i32)
+                (drop (call $set_constant (i32.const 0) (i32.const 3) (f32.const 1.0)))
+                (call $get_constant (i32.const 0) (i32.const 3) (i32.const 100))
+            )
+        )
+    "#;
+    let mut instance = load_wat(
+        wat,
+        manifest_requesting(vec![Permission::ReadTables, Permission::WriteConstants]),
+        &[Permission::ReadTables, Permission::WriteConstants],
+    );
+
+    // First run: 'rpm' is in the snapshot, so the read succeeds and a
+    // SetConstant proposal is recorded.
+    let first = instance
+        .execute(snapshot_with_constant("rpm", 42.0))
+        .expect("execute failed");
+    assert_eq!(first.result_code, Some(0));
+    assert_eq!(first.proposals.len(), 1);
+    assert_eq!(first.exec_count, 1);
+
+    // Second run with an empty snapshot: the read must NOT_FOUND rather than
+    // seeing the previous run's data, and the first run's proposal must not
+    // reappear.
+    let second = instance
+        .execute(PluginDataSnapshot::default())
+        .expect("execute failed");
+    assert_eq!(second.result_code, Some(-3));
+    assert_eq!(
+        second.proposals.len(),
+        1,
+        "the set_constant call itself still records a proposal this run"
+    );
+    assert_eq!(second.exec_count, 2);
 }
 
 #[test]
@@ -571,17 +783,18 @@ fn negative_pointer_is_rejected() {
 }
 
 #[test]
-fn subscribe_channel_and_get_channel_value_round_trip_with_permission() {
+fn subscribe_channel_and_get_channel_value_round_trip_with_real_data() {
+    // Both calls happen inside one plugin_execute, matching how a real
+    // plugin would use the ABI — subscribed_channels (and the id it hands
+    // back) only lives for the duration of a single execute() run.
     let wat = r#"
         (module
             (import "env" "subscribe_channel" (func $subscribe_channel (param i32 i32 i32) (result i32)))
             (import "env" "get_channel_value" (func $get_channel_value (param i32 i32) (result i32)))
             (memory (export "memory") 1)
             (data (i32.const 0) "RPM")
-            (func (export "subscribe") (result i32)
-                (call $subscribe_channel (i32.const 0) (i32.const 3) (i32.const 100))
-            )
             (func (export "plugin_execute") (result i32)
+                (drop (call $subscribe_channel (i32.const 0) (i32.const 3) (i32.const 100)))
                 (call $get_channel_value (i32.const 0) (i32.const 104))
             )
         )
@@ -591,12 +804,33 @@ fn subscribe_channel_and_get_channel_value_round_trip_with_permission() {
         manifest_requesting(vec![Permission::SubscribeChannels]),
         &[Permission::SubscribeChannels],
     );
-    let sub_result = instance.call_i32_export("subscribe").expect("call failed");
-    assert_eq!(sub_result, 0);
-    let value_result = instance
-        .call_i32_export("plugin_execute")
-        .expect("call failed");
-    assert_eq!(value_result, 0);
+    let result = instance
+        .execute(snapshot_with_channel("RPM", 4500.0))
+        .expect("execute failed");
+    assert_eq!(result.result_code, Some(0));
+
+    let written = instance.read_memory(104, 4).expect("memory read failed");
+    let value = f32::from_le_bytes(written.try_into().unwrap());
+    assert_eq!(value, 4500.0);
+}
+
+#[test]
+fn subscribe_channel_denied_without_permission_still_via_execute() {
+    let wat = r#"
+        (module
+            (import "env" "subscribe_channel" (func $subscribe_channel (param i32 i32 i32) (result i32)))
+            (memory (export "memory") 1)
+            (data (i32.const 0) "RPM")
+            (func (export "plugin_execute") (result i32)
+                (call $subscribe_channel (i32.const 0) (i32.const 3) (i32.const 100))
+            )
+        )
+    "#;
+    let mut instance = load_wat(wat, manifest_requesting(vec![]), &[]);
+    let result = instance
+        .execute(snapshot_with_channel("RPM", 4500.0))
+        .expect("execute failed");
+    assert_eq!(result.result_code, Some(-1));
 }
 
 #[test]

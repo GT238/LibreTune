@@ -14,6 +14,18 @@ interface Plugin {
   exec_count: number;
 }
 
+interface AppliedConstant {
+  name: string;
+  value: number;
+}
+
+interface WasmPluginExecutionResult {
+  exec_count: number;
+  result_code: number | null;
+  applied_constants: AppliedConstant[];
+  unapplied_actions: string[];
+}
+
 interface PluginPanelProps {
   isConnected: boolean;
 }
@@ -27,6 +39,7 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
   const [showPermissions, setShowPermissions] = useState(false);
   const [pendingPlugin, setPendingPlugin] = useState<{ path: string; name: string } | null>(null);
   const [consentedPermissions, setConsentedPermissions] = useState<Set<string>>(new Set());
+  const [lastResult, setLastResult] = useState<WasmPluginExecutionResult | null>(null);
 
   // Load list of plugins
   const loadPlugins = useCallback(async () => {
@@ -130,12 +143,14 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
   // Execute plugin
   const handleExecutePlugin = useCallback(async (name: string) => {
     try {
-      await invoke("execute_wasm_plugin", { name });
+      const result: WasmPluginExecutionResult = await invoke("execute_wasm_plugin", { name });
+      setLastResult(result);
       await loadPlugins();
     } catch (error) {
       console.error("Failed to execute plugin:", error);
+      setLastResult(null);
     }
-  }, []);
+  }, [loadPlugins]);
 
   // Get permission display
   const getPermissionDisplay = (perm: string): { label: string; Icon: LucideIcon | null } => {
@@ -296,6 +311,32 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
               <label>Executions</label>
               <span className="plugin-value">{selected.exec_count}</span>
             </div>
+
+            {lastResult && (
+              <div className="plugin-info-section">
+                <label>Last Run Result</label>
+                <div className="plugin-permissions-list">
+                  {lastResult.applied_constants.length === 0 &&
+                  lastResult.unapplied_actions.length === 0 ? (
+                    <p className="plugin-no-perms">No changes proposed</p>
+                  ) : (
+                    <>
+                      {lastResult.applied_constants.map((c) => (
+                        <div key={c.name} className="plugin-permission-item">
+                          Set {c.name} = {c.value}
+                        </div>
+                      ))}
+                      {lastResult.unapplied_actions.length > 0 && (
+                        <p className="plugin-no-perms">
+                          {lastResult.unapplied_actions.length} action(s) proposed but not yet
+                          applied — action-scripting execution isn't wired up yet.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="plugin-actions">
               <button
