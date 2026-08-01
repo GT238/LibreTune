@@ -5,10 +5,13 @@
 
 use crate::state::AppState;
 use libretune_core::plugin_system::{
-    Permission as WasmPermission, PluginConfig as WasmPluginConfig,
+    Permission as WasmPermission, PluginConfig as WasmPluginConfig, PluginDataSnapshot,
     PluginManager as WasmPluginManager, PluginManifest as WasmPluginManifest,
+    PluginProposal as WasmPluginProposal, TableSnapshot as WasmTableSnapshot,
 };
+use libretune_core::tune::TuneValue;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Parse the frontend's string permission names (e.g. from consent-dialog
 /// checkboxes) into typed [`WasmPermission`]s, ignoring anything unrecognized
@@ -142,15 +145,154 @@ pub async fn list_wasm_plugins(
     }
 }
 
-/// Execute a WASM plugin by name.
+/// A constant a plugin proposed and that was actually applied.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppliedConstant {
+    pub name: String,
+    pub value: f64,
+}
+
+/// Result of one `execute_wasm_plugin` call, reported back to the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmPluginExecutionResult {
+    pub exec_count: u64,
+    /// The plugin's own `plugin_execute()` return value, if it exported one.
+    pub result_code: Option<i32>,
+    /// Constants the plugin proposed that were actually written (through the
+    /// same path a user-driven edit takes).
+    pub applied_constants: Vec<AppliedConstant>,
+    /// Action-scripting proposals the plugin made that were *not* applied —
+    /// LibreTune's action-scripting engine has no generic "run this one
+    /// action now" dispatcher yet, so these are surfaced as raw JSON rather
+    /// than silently dropped or half-implemented.
+    pub unapplied_actions: Vec<String>,
+}
+
+/// Build a read-only snapshot of current tune/table/channel data for a
+/// plugin's `execute()` call.
+///
+/// Table and constant reads are offline-only — sourced from the synced tune
+/// cache via [`crate::get_table_data_internal`] and [`TuneFile::get_value`],
+/// never a live ECU read — matching how the table editors already treat
+/// synced data as authoritative, and sidestepping any risk of holding a lock
+/// across ECU I/O while building this. Channel data comes from a single
+/// best-effort realtime poll; if not connected, `channels` is simply empty
+/// rather than failing the whole snapshot.
+async fn build_plugin_data_snapshot(state: &tauri::State<'_, AppState>) -> PluginDataSnapshot {
+    let table_names: Vec<String> = {
+        let def_guard = state.definition.lock().await;
+        def_guard
+            .as_ref()
+            .map(|d| d.tables.values().map(|t| t.name.clone()).collect())
+            .unwrap_or_default()
+    };
+
+    let mut tables = HashMap::new();
+    for name in &table_names {
+        if let Ok(t) = crate::get_table_data_internal(state, name).await {
+            tables.insert(
+                name.clone(),
+                WasmTableSnapshot {
+                    x_bins: t.x_bins,
+                    y_bins: t.y_bins,
+                    z_values: t.z_values,
+                },
+            );
+        }
+    }
+
+    let constant_names: Vec<String> = {
+        let def_guard = state.definition.lock().await;
+        def_guard
+            .as_ref()
+            .map(|d| d.constants.keys().cloned().collect())
+            .unwrap_or_default()
+    };
+    let mut constants = HashMap::new();
+    {
+        let tune_guard = state.current_tune.lock().await;
+        if let Some(tune) = tune_guard.as_ref() {
+            for name in &constant_names {
+                match tune.get_value(name) {
+                    Some(TuneValue::Scalar(v)) => {
+                        constants.insert(name.clone(), *v);
+                    }
+                    Some(TuneValue::Bool(b)) => {
+                        constants.insert(name.clone(), if *b { 1.0 } else { 0.0 });
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let channels = crate::commands::realtime_get::get_realtime_data(state.clone())
+        .await
+        .unwrap_or_default();
+
+    PluginDataSnapshot {
+        tables,
+        constants,
+        channels,
+    }
+}
+
+/// Execute a WASM plugin by name against a fresh snapshot of current
+/// tune/table/channel data. Any `set_constant` proposal the plugin made
+/// (only reachable if `WriteConstants` was granted at load time) is applied
+/// afterward via the same [`crate::commands::constant_update::update_constant`]
+/// path a user-driven edit takes; `execute_action` proposals are returned
+/// unapplied.
 #[tauri::command]
 pub async fn execute_wasm_plugin(
     name: String,
     state: tauri::State<'_, AppState>,
-) -> Result<u64, String> {
-    let mut pm_guard = state.wasm_plugin_manager.lock().await;
-    let pm = pm_guard.as_mut().ok_or("Plugin manager not initialized")?;
-    pm.execute_plugin(&name)
+) -> Result<WasmPluginExecutionResult, String> {
+    let snapshot = build_plugin_data_snapshot(&state).await;
+
+    let result = {
+        let mut pm_guard = state.wasm_plugin_manager.lock().await;
+        let pm = pm_guard.as_mut().ok_or("Plugin manager not initialized")?;
+        pm.execute_plugin(&name, snapshot)?
+    };
+
+    let mut applied_constants = Vec::new();
+    let mut unapplied_actions = Vec::new();
+    for proposal in result.proposals {
+        match proposal {
+            WasmPluginProposal::SetConstant {
+                name: const_name,
+                value,
+            } => {
+                match crate::commands::constant_update::update_constant(
+                    state.clone(),
+                    const_name.clone(),
+                    value,
+                )
+                .await
+                {
+                    Ok(()) => applied_constants.push(AppliedConstant {
+                        name: const_name,
+                        value,
+                    }),
+                    Err(e) => eprintln!(
+                        "[WARN] plugin '{}' proposed constant '{}' = {} but the write failed: {}",
+                        name, const_name, value, e
+                    ),
+                }
+            }
+            WasmPluginProposal::ExecuteAction { action_json } => {
+                unapplied_actions.push(action_json);
+            }
+        }
+    }
+
+    Ok(WasmPluginExecutionResult {
+        exec_count: result.exec_count,
+        result_code: result.result_code,
+        applied_constants,
+        unapplied_actions,
+    })
 }
 
 /// Get info about a specific WASM plugin.

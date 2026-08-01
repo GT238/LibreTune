@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { BookOpen, Pencil, Radio, Zap, ChevronDown, ChevronRight, type LucideIcon } from "lucide-react";
+import { useToast } from "../contexts/ToastContext";
 import "./PluginPanel.css";
 
 interface Plugin {
@@ -14,6 +15,18 @@ interface Plugin {
   exec_count: number;
 }
 
+interface AppliedConstant {
+  name: string;
+  value: number;
+}
+
+interface WasmPluginExecutionResult {
+  exec_count: number;
+  result_code: number | null;
+  applied_constants: AppliedConstant[];
+  unapplied_actions: string[];
+}
+
 interface PluginPanelProps {
   isConnected: boolean;
 }
@@ -21,12 +34,14 @@ interface PluginPanelProps {
 const ALL_PERMISSIONS = ["ReadTables", "WriteConstants", "SubscribeChannels", "ExecuteActions"];
 
 export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
+  const { showToast } = useToast();
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedPlugin, setSelectedPlugin] = useState<string | null>(null);
   const [showPermissions, setShowPermissions] = useState(false);
   const [pendingPlugin, setPendingPlugin] = useState<{ path: string; name: string } | null>(null);
   const [consentedPermissions, setConsentedPermissions] = useState<Set<string>>(new Set());
+  const [lastResult, setLastResult] = useState<WasmPluginExecutionResult | null>(null);
 
   // Load list of plugins
   const loadPlugins = useCallback(async () => {
@@ -65,8 +80,9 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
       }
     } catch (error) {
       console.error("Failed to load plugin:", error);
+      showToast(`Failed to open plugin file: ${error}`, "error");
     }
-  }, []);
+  }, [showToast]);
 
   const togglePendingPermission = useCallback((perm: string) => {
     setConsentedPermissions((prev) => {
@@ -104,14 +120,16 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
         manifestJson: manifest,
         approvedPermissions: approved,
       });
+      showToast(`Loaded plugin "${pendingPlugin.name}"`, "success");
       await loadPlugins();
     } catch (error) {
       console.error("Failed to load plugin:", error);
+      showToast(`Failed to load plugin: ${error}`, "error");
     } finally {
       setPendingPlugin(null);
       setConsentedPermissions(new Set());
     }
-  }, [pendingPlugin, consentedPermissions, loadPlugins]);
+  }, [pendingPlugin, consentedPermissions, loadPlugins, showToast]);
 
   // Unload plugin
   const handleUnloadPlugin = useCallback(
@@ -122,20 +140,24 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
         setSelectedPlugin(null);
       } catch (error) {
         console.error("Failed to unload plugin:", error);
+        showToast(`Failed to unload plugin: ${error}`, "error");
       }
     },
-    [loadPlugins]
+    [loadPlugins, showToast]
   );
 
   // Execute plugin
   const handleExecutePlugin = useCallback(async (name: string) => {
     try {
-      await invoke("execute_wasm_plugin", { name });
+      const result: WasmPluginExecutionResult = await invoke("execute_wasm_plugin", { name });
+      setLastResult(result);
       await loadPlugins();
     } catch (error) {
       console.error("Failed to execute plugin:", error);
+      showToast(`Failed to execute plugin: ${error}`, "error");
+      setLastResult(null);
     }
-  }, []);
+  }, [loadPlugins, showToast]);
 
   // Get permission display
   const getPermissionDisplay = (perm: string): { label: string; Icon: LucideIcon | null } => {
@@ -296,6 +318,32 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
               <label>Executions</label>
               <span className="plugin-value">{selected.exec_count}</span>
             </div>
+
+            {lastResult && (
+              <div className="plugin-info-section">
+                <label>Last Run Result</label>
+                <div className="plugin-permissions-list">
+                  {lastResult.applied_constants.length === 0 &&
+                  lastResult.unapplied_actions.length === 0 ? (
+                    <p className="plugin-no-perms">No changes proposed</p>
+                  ) : (
+                    <>
+                      {lastResult.applied_constants.map((c) => (
+                        <div key={c.name} className="plugin-permission-item">
+                          Set {c.name} = {c.value}
+                        </div>
+                      ))}
+                      {lastResult.unapplied_actions.length > 0 && (
+                        <p className="plugin-no-perms">
+                          {lastResult.unapplied_actions.length} action(s) proposed but not yet
+                          applied — action-scripting execution isn't wired up yet.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="plugin-actions">
               <button
