@@ -151,6 +151,7 @@ pub(crate) async fn apply_demo_enable(
         *def_guard = Some(def);
     }
     crate::commands::data_logging::stop_recording_on_definition_change(state).await;
+    crate::commands::realtime_stream::stop_streaming_on_definition_change(state).await;
 
     // Set demo mode flag
     {

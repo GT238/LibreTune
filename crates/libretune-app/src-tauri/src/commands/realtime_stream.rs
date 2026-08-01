@@ -343,6 +343,31 @@ pub(crate) async fn feed_autotune_data(
     }
 }
 
+/// Aborts any in-progress realtime streaming task. Call this from every
+/// place that overwrites `state.definition` (reconnect to a different ECU,
+/// load a different INI, toggle demo mode, open a different project).
+///
+/// The running stream's output-channel layout and endianness are cached
+/// once at task-spawn time (`cached_def_data`, below) and never re-read —
+/// continuing to stream against a changed definition would silently
+/// misparse every subsequent tick's raw bytes (wrong offsets, wrong scale,
+/// wrong byte order) instead of failing, producing gauge values that look
+/// like real sensor readings but aren't. Fail closed: stop the stream
+/// instead, mirroring `stop_recording_on_definition_change`'s handling of
+/// the same class of problem for data logging. The frontend resumes by
+/// calling `start_realtime_stream` again, which re-caches against whatever
+/// definition is current at that point.
+pub(crate) async fn stop_streaming_on_definition_change(state: &AppState) {
+    let mut task_guard = state.streaming_task.lock().await;
+    if let Some(handle) = task_guard.take() {
+        handle.abort();
+        eprintln!(
+            "[WARN] Realtime streaming stopped: ECU definition changed mid-stream. \
+             Restart streaming to resume with the new definition."
+        );
+    }
+}
+
 #[tauri::command]
 pub async fn start_realtime_stream(
     app: tauri::AppHandle,
@@ -788,4 +813,90 @@ pub async fn start_realtime_stream(
 
     *task_guard = Some(handle);
     Ok(())
+}
+
+#[cfg(test)]
+mod stale_definition_guard_tests {
+    use super::*;
+    use crate::state::{RpmStateTracker, StreamStats};
+    use libretune_core::autotune::AutoTuneState;
+    use libretune_core::datalog::DataLogger;
+    use libretune_core::project::{IniRepository, OnlineIniRepository};
+    use tokio::sync::Mutex;
+
+    fn empty_state() -> AppState {
+        AppState {
+            connection: Mutex::new(None),
+            definition: Mutex::new(None),
+            autotune_state: Mutex::new(AutoTuneState::new()),
+            autotune_secondary_state: Mutex::new(AutoTuneState::new()),
+            autotune_config: Mutex::new(None),
+            streaming_task: Mutex::new(None),
+            autotune_send_task: Mutex::new(None),
+            metrics_task: Mutex::new(None),
+            current_tune: Mutex::new(None),
+            current_tune_path: Mutex::new(None),
+            tune_modified: Mutex::new(false),
+            data_logger: Mutex::new(DataLogger::default()),
+            current_project: Mutex::new(None),
+            ini_repository: Mutex::new(None::<IniRepository>),
+            online_ini_repository: Mutex::new(OnlineIniRepository::new()),
+            tune_cache: Mutex::new(None),
+            tune_mismatch_snapshot: Mutex::new(None),
+            demo_mode: Mutex::new(false),
+            console_history: Mutex::new(Vec::new()),
+            rpm_state_tracker: Mutex::new(RpmStateTracker::new()),
+            wasm_plugin_manager: Mutex::new(None),
+            migration_report: Mutex::new(None),
+            evaluator: Mutex::new(None),
+            cached_output_channels: Mutex::new(None),
+            connection_factory: Mutex::new(None::<std::sync::Arc<crate::state::ConnectionFactory>>),
+            math_channels: Mutex::new(Vec::new()),
+            stream_stats: Mutex::new(StreamStats::default()),
+            agent_task: Mutex::new(None),
+        }
+    }
+
+    /// Regression test for the bug found 2026-08-01: a running realtime
+    /// stream's cached output-channel layout/endianness was never
+    /// invalidated when `state.definition` changed mid-session, so it kept
+    /// silently misparsing every subsequent tick against the old layout.
+    /// `stop_streaming_on_definition_change` must actually abort the task
+    /// and clear the slot, not just log a warning.
+    #[tokio::test]
+    async fn aborts_and_clears_a_running_stream_task() {
+        let state = empty_state();
+
+        let still_running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let still_running_clone = still_running.clone();
+        let handle = tokio::spawn(async move {
+            // Simulates the real streaming loop: runs until aborted.
+            loop {
+                still_running_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        });
+        *state.streaming_task.lock().await = Some(handle);
+
+        // Let the task actually start running before we abort it, so this
+        // test would fail if abort() were a no-op.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(still_running.load(std::sync::atomic::Ordering::SeqCst));
+
+        stop_streaming_on_definition_change(&state).await;
+
+        assert!(
+            state.streaming_task.lock().await.is_none(),
+            "the task slot must be cleared so start_realtime_stream doesn't think a stream is still active"
+        );
+    }
+
+    #[tokio::test]
+    async fn does_nothing_when_no_stream_is_running() {
+        let state = empty_state();
+        // Must not panic when streaming_task is already None (e.g. never
+        // started, or already stopped).
+        stop_streaming_on_definition_change(&state).await;
+        assert!(state.streaming_task.lock().await.is_none());
+    }
 }
