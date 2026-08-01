@@ -133,3 +133,64 @@ fn test_fill_down() {
     assert_eq!(result[1][1], 20.0);
     assert_eq!(result[2][2], 30.0);
 }
+
+// Regression tests (2026-08-01): a selection referencing cells outside the
+// table's actual dimensions — e.g. a stale multi-cell selection left over
+// from before rebin_table shrank the table — must be a safe no-op, not a
+// panic. Every other function in table_ops.rs already bounds-checks via
+// get_cell_value(); these two indexed directly and didn't.
+
+#[test]
+fn test_interpolate_linear_out_of_bounds_row_is_noop_not_panic() {
+    let z_values = vec![vec![10.0, 20.0, 30.0], vec![40.0, 50.0, 60.0]];
+    // Row 5 doesn't exist (table only has 2 rows).
+    let selected_cells = vec![(5, 0), (5, 2)];
+
+    let result = interpolate_linear(&z_values, selected_cells, InterpolationAxis::Row);
+
+    assert_eq!(
+        result, z_values,
+        "out-of-range selection must leave the table unchanged"
+    );
+}
+
+#[test]
+fn test_interpolate_linear_out_of_bounds_col_is_noop_not_panic() {
+    let z_values = vec![vec![10.0, 20.0], vec![30.0, 40.0]];
+    // Column 9 doesn't exist (table only has 2 columns).
+    let selected_cells = vec![(0, 9), (1, 9)];
+
+    let result = interpolate_linear(&z_values, selected_cells, InterpolationAxis::Col);
+
+    assert_eq!(
+        result, z_values,
+        "out-of-range selection must leave the table unchanged"
+    );
+}
+
+#[test]
+fn test_fill_region_out_of_bounds_is_noop_not_panic() {
+    let z_values = vec![vec![10.0, 0.0], vec![20.0, 0.0]];
+    // Row 3 doesn't exist (table only has 2 rows) — this is exactly the
+    // kind of stale selection a rebin_table shrink would produce.
+    let selected_cells = vec![(0, 0), (0, 1), (3, 0), (3, 1)];
+
+    let result = fill_region(&z_values, selected_cells, FillDirection::Right);
+
+    assert_eq!(
+        result, z_values,
+        "out-of-range selection must leave the table unchanged"
+    );
+}
+
+#[test]
+fn test_fill_region_partially_out_of_bounds_is_noop() {
+    // Selection is mostly valid but includes one cell past the last column —
+    // the whole operation must be rejected rather than partially applied.
+    let z_values = vec![vec![10.0, 0.0, 0.0]];
+    let selected_cells = vec![(0, 0), (0, 1), (0, 2), (0, 99)];
+
+    let result = fill_region(&z_values, selected_cells, FillDirection::Right);
+
+    assert_eq!(result, z_values);
+}

@@ -237,8 +237,17 @@ pub async fn get_curve_data(
     })
 }
 
+/// Snapshot of the definition-derived facts `write_constant_array_values`
+/// needs, taken before `state.definition`'s lock is dropped (see
+/// `update_curve_data`). Bundled into one struct rather than passed as two
+/// separate params to stay under clippy's too-many-arguments threshold.
+struct WriteContext {
+    endianness: libretune_core::ini::Endianness,
+    default_page_bytes: usize,
+}
+
 fn write_constant_array_values(
-    def: &libretune_core::ini::EcuDefinition,
+    ctx: &WriteContext,
     constant: &libretune_core::ini::Constant,
     values: &[f64],
     cache: &mut libretune_core::tune::TuneCache,
@@ -263,7 +272,7 @@ fn write_constant_array_values(
         let offset = i * element_size;
         constant
             .data_type
-            .write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
+            .write_to_bytes(&mut raw_data, offset, raw_val, ctx.endianness);
     }
 
     if cache.write_bytes(constant.page, constant.offset, &raw_data) {
@@ -273,15 +282,10 @@ fn write_constant_array_values(
                 libretune_core::tune::TuneValue::Array(values.to_vec()),
             );
 
-            let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                vec![
-                    0u8;
-                    def.page_sizes
-                        .get(constant.page as usize)
-                        .copied()
-                        .unwrap_or(256) as usize
-                ]
-            });
+            let page_data = tune
+                .pages
+                .entry(constant.page)
+                .or_insert_with(|| vec![0u8; ctx.default_page_bytes]);
 
             let start = constant.offset as usize;
             let end = start + raw_data.len();
@@ -324,40 +328,66 @@ pub async fn update_curve_data(
         return Err("No curve values provided".to_string());
     }
 
+    // Snapshot only what we need from the definition, then drop the lock
+    // before doing any ECU I/O below — holding it across a blocking
+    // conn.write_memory() call starves every other command that needs the
+    // definition (e.g. load_tune, table/curve reads). Matches the
+    // established pattern in update_constant/update_constant_array_internal.
+    let (x_ctx, x_const, y_ctx, y_const) = {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+
+        let curve = def
+            .get_curve_by_name_or_map(&curve_name)
+            .ok_or_else(|| format!("Curve {} not found", curve_name))?;
+
+        let x_const_name = curve.x_bins.clone();
+        let y_const_name = curve.y_bins.clone();
+        let x_const = def
+            .constants
+            .get(&x_const_name)
+            .ok_or_else(|| {
+                format!(
+                    "Constant {} not found for curve {}",
+                    x_const_name, curve_name
+                )
+            })?
+            .clone();
+        let y_const = def
+            .constants
+            .get(&y_const_name)
+            .ok_or_else(|| {
+                format!(
+                    "Constant {} not found for curve {}",
+                    y_const_name, curve_name
+                )
+            })?
+            .clone();
+
+        let x_ctx = WriteContext {
+            endianness: def.endianness,
+            default_page_bytes: def
+                .page_sizes
+                .get(x_const.page as usize)
+                .copied()
+                .unwrap_or(256) as usize,
+        };
+        let y_ctx = WriteContext {
+            endianness: def.endianness,
+            default_page_bytes: def
+                .page_sizes
+                .get(y_const.page as usize)
+                .copied()
+                .unwrap_or(256) as usize,
+        };
+
+        (x_ctx, x_const, y_ctx, y_const)
+    };
+
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
     let mut cache_guard = state.tune_cache.lock().await;
     let mut tune_guard = state.current_tune.lock().await;
     let mut modified_guard = state.tune_modified.lock().await;
-
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-
-    let curve = def
-        .get_curve_by_name_or_map(&curve_name)
-        .ok_or_else(|| format!("Curve {} not found", curve_name))?;
-
-    let x_const_name = curve.x_bins.clone();
-    let y_const_name = curve.y_bins.clone();
-    let x_const = def
-        .constants
-        .get(&x_const_name)
-        .ok_or_else(|| {
-            format!(
-                "Constant {} not found for curve {}",
-                x_const_name, curve_name
-            )
-        })?
-        .clone();
-    let y_const = def
-        .constants
-        .get(&y_const_name)
-        .ok_or_else(|| {
-            format!(
-                "Constant {} not found for curve {}",
-                y_const_name, curve_name
-            )
-        })?
-        .clone();
 
     let cache = cache_guard
         .as_mut()
@@ -366,7 +396,7 @@ pub async fn update_curve_data(
 
     if let Some(values) = x_values {
         write_constant_array_values(
-            def,
+            &x_ctx,
             &x_const,
             &values,
             cache,
@@ -378,7 +408,7 @@ pub async fn update_curve_data(
 
     if let Some(values) = y_values {
         write_constant_array_values(
-            def,
+            &y_ctx,
             &y_const,
             &values,
             cache,

@@ -328,6 +328,17 @@ pub fn interpolate_linear(
         max_y = max_y.max(y);
     }
 
+    // Reject (no-op) rather than panic if the selection references cells
+    // outside the table's current dimensions — e.g. a stale selection left
+    // over from before rebin_table shrank the table. Every other function
+    // in this module bounds-checks via get_cell_value(); this one and
+    // fill_region index directly below, so the check has to happen here.
+    let rows = result.len();
+    let cols = if rows > 0 { result[0].len() } else { 0 };
+    if max_y >= rows || max_x >= cols {
+        return result;
+    }
+
     match axis {
         InterpolationAxis::Row => {
             // Horizontal interpolation: for each row y from min_y to max_y
@@ -392,6 +403,14 @@ pub fn fill_region(
         max_x = max_x.max(x);
         min_y = min_y.min(y);
         max_y = max_y.max(y);
+    }
+
+    // Reject (no-op) rather than panic if the selection references cells
+    // outside the table's current dimensions — see interpolate_linear.
+    let rows = result.len();
+    let cols = if rows > 0 { result[0].len() } else { 0 };
+    if max_y >= rows || max_x >= cols {
+        return result;
     }
 
     match direction {
