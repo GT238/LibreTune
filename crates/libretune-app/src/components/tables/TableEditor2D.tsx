@@ -7,6 +7,7 @@ import TableEditor3D from './TableEditor3D';
 import TableContextMenu from './TableContextMenu';
 import RebinDialog from '../dialogs/RebinDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
+import { Dialog, Button, FormField } from '../common';
 import LambdaPreviewTable from './LambdaPreviewTable';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import { useTableYAxisBottom, useTrailFadeSec } from '../../utils/useTableOrientation';
@@ -190,6 +191,11 @@ export default function TableEditor2D({
     row: 0,
     col: 0,
     value: 0,
+  });
+
+  const [scaleDialog, setScaleDialog] = useState<{ show: boolean; factor: string }>({
+    show: false,
+    factor: '1.05',
   });
 
   const [followMode, setFollowMode] = useState(true);
@@ -415,7 +421,8 @@ export default function TableEditor2D({
 
       const isCtrl = e.ctrlKey || e.metaKey;
       const isShift = e.shiftKey;
-      const multiplier = isCtrl ? 5 : 1; // Ctrl = 5x increment
+      // handleIncrease/handleDecrease take a fraction, not a multiplier.
+      const stepFraction = isCtrl ? 0.05 : 0.01;
       
       // Build composite key for Ctrl+key combinations
       const getKeyCombo = (key: string): string => {
@@ -496,22 +503,22 @@ export default function TableEditor2D({
       }
       if (matchesAction('table.increase') || ['>', '.', 'q'].includes(e.key)) {
         e.preventDefault();
-        handleIncrease(multiplier);
+        handleIncrease(stepFraction);
         return;
       }
       if (matchesAction('table.decrease') || ['<', ',', '-', '_'].includes(e.key)) {
         e.preventDefault();
-        handleDecrease(multiplier);
+        handleDecrease(stepFraction);
         return;
       }
       if (matchesAction('table.increaseMultiple') || e.key === '+') {
         e.preventDefault();
-        handleIncrease(10 * multiplier);
+        handleIncrease(10 * stepFraction);
         return;
       }
       if (matchesAction('table.scale') || e.key === '*') {
         e.preventDefault();
-        handleScale(1.0);
+        openScaleDialog();
         return;
       }
       if (matchesAction('table.interpolate') || e.key === '/') {
@@ -670,8 +677,8 @@ export default function TableEditor2D({
 
     try {
       const result = await invoke<TableOperationResult>('set_cells_equal', {
-        table_name,
-        selected_cells: selectedCellsPayload,
+        tableName: table_name,
+        selectedCells: selectedCellsPayload,
         value: avgValue
       });
       if (result && result.z_values) {
@@ -691,7 +698,7 @@ export default function TableEditor2D({
   };
 
   const handleScaleWrapper = () => {
-    handleScale(1.0);
+    openScaleDialog();
   };
 
   const handleContextMenuSetEqual = (_value: number) => {
@@ -730,9 +737,9 @@ export default function TableEditor2D({
     const previousValues = localZValues.map((row) => [...row]);
     try {
       const result = await invoke<TableOperationResult>('scale_cells', {
-        table_name,
-        selected_cells: selectedCellsPayload,
-        scale_factor: factor
+        tableName: table_name,
+        selectedCells: selectedCellsPayload,
+        scaleFactor: factor
       });
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
@@ -745,12 +752,25 @@ export default function TableEditor2D({
     }
   };
 
+  const openScaleDialog = () => {
+    if (selectedCellsCoords.length === 0) return;
+    setContextMenu({ visible: false, x: 0, y: 0, value: 0 });
+    setScaleDialog(prev => ({ ...prev, show: true }));
+  };
+
+  const handleScaleDialogApply = () => {
+    const factor = parseFloat(scaleDialog.factor);
+    if (!Number.isFinite(factor)) return;
+    setScaleDialog(prev => ({ ...prev, show: false }));
+    handleScale(factor);
+  };
+
   const handleSmooth = async () => {
     const previousValues = localZValues.map((row) => [...row]);
     try {
       const result = await invoke<TableOperationResult>('smooth_table', {
-        table_name,
-        selected_cells: selectedCellsPayload,
+        tableName: table_name,
+        selectedCells: selectedCellsPayload,
         factor: 1.0
       });
       if (result && result.z_values) {
@@ -768,8 +788,8 @@ export default function TableEditor2D({
     const previousValues = localZValues.map((row) => [...row]);
     try {
       const result = await invoke<TableOperationResult>('interpolate_cells', {
-        table_name,
-        selected_cells: selectedCellsPayload
+        tableName: table_name,
+        selectedCells: selectedCellsPayload
       });
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
@@ -786,8 +806,8 @@ export default function TableEditor2D({
     const previousValues = localZValues.map((row) => [...row]);
     try {
       const result = await invoke<TableOperationResult>('add_offset', {
-        table_name,
-        selected_cells: selectedCellsPayload,
+        tableName: table_name,
+        selectedCells: selectedCellsPayload,
         offset: offset
       });
       if (result && result.z_values) {
@@ -805,8 +825,8 @@ export default function TableEditor2D({
     const previousValues = localZValues.map((row) => [...row]);
     try {
       const result = await invoke<TableOperationResult>('interpolate_linear', {
-        table_name,
-        selected_cells: selectedCellsPayload,
+        tableName: table_name,
+        selectedCells: selectedCellsPayload,
         axis: axis
       });
       if (result && result.z_values) {
@@ -824,8 +844,8 @@ export default function TableEditor2D({
     const previousValues = localZValues.map((row) => [...row]);
     try {
       const result = await invoke<TableOperationResult>('fill_region', {
-        table_name,
-        selected_cells: selectedCellsPayload,
+        tableName: table_name,
+        selectedCells: selectedCellsPayload,
         direction: direction
       });
       if (result && result.z_values) {
@@ -852,10 +872,10 @@ export default function TableEditor2D({
 
     try {
       const result = await invoke<TableOperationResult>('rebin_table', {
-        table_name,
-        new_x_bins: newXBins,
-        new_y_bins: newYBins,
-        interpolate_z: interpolateZ
+        tableName: table_name,
+        newXBins: newXBins,
+        newYBins: newYBins,
+        interpolateZ: interpolateZ
       });
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
@@ -1056,9 +1076,16 @@ export default function TableEditor2D({
     });
   };
 
-  const handleRightClick = (e: React.MouseEvent, x: number, y: number) => {
+  const handleRightClick = (e: React.MouseEvent, x: number, y: number, cell: HTMLElement) => {
     e.preventDefault();
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
+
+    // Every menu action except lock/unlock operates on the selection, so a
+    // right-click outside it would silently target a different region.
+    if (!selectedCellsCoords.some(([sx, sy]) => sx === x && sy === y)) {
+      setSelectionRange({ start: [x, y], end: [x, y] });
+    }
+
+    const rect = cell.getBoundingClientRect();
     setContextMenu({
       visible: true,
       x,
@@ -1231,15 +1258,14 @@ export default function TableEditor2D({
       <div
         className={`editor-content${hasEmbeddedTableLiveReadout(table_name, x_output_channel, y_output_channel) ? ' editor-content--with-live' : ''}${isAfrTargetTable ? ' editor-content--with-lambda' : ''}`}
         onContextMenu={e => {
-          const target = e.target as HTMLElement;
-          if (target.classList.contains('table-cell')) {
-            const cell = target.closest('.table-cell') as HTMLElement;
-            if (cell) {
-              const x = parseInt(cell.dataset.x || '0');
-              const y = parseInt(cell.dataset.y || '0');
-              handleRightClick(e, x, y);
-            }
-          }
+          // The event target is usually the inner value span, so walk up to the cell.
+          const cell = (e.target as HTMLElement).closest('.table-cell') as HTMLElement | null;
+          if (!cell) return;
+          const x = Number(cell.dataset.x);
+          const y = Number(cell.dataset.y);
+          if (!Number.isInteger(x) || !Number.isInteger(y)) return;
+          if (!localZValues[y] || localZValues[y][x] === undefined) return;
+          handleRightClick(e, x, y, cell);
         }}
       >
         <TableGrid
@@ -1330,6 +1356,46 @@ export default function TableEditor2D({
         xAxisName={x_axis_name}
         yAxisName={y_axis_name}
       />
+
+      <Dialog
+        open={scaleDialog.show}
+        onClose={() => setScaleDialog(prev => ({ ...prev, show: false }))}
+        size="sm"
+        title="Scale Selected Cells"
+      >
+        <Dialog.Body>
+          <FormField
+            label="Multiplier"
+            help={`Applied to ${selectedCellsCoords.length} selected cell(s). 1.05 = +5%, 0.95 = -5%.`}
+          >
+            {id => (
+              <input
+                id={id}
+                type="number"
+                step="any"
+                autoFocus
+                value={scaleDialog.factor}
+                onChange={e => setScaleDialog(prev => ({ ...prev, factor: e.target.value }))}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleScaleDialogApply();
+                }}
+              />
+            )}
+          </FormField>
+        </Dialog.Body>
+        <Dialog.Footer>
+          <Button variant="secondary" onClick={() => setScaleDialog(prev => ({ ...prev, show: false }))}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleScaleDialogApply}
+            disabled={!Number.isFinite(parseFloat(scaleDialog.factor))}
+          >
+            Apply
+          </Button>
+        </Dialog.Footer>
+      </Dialog>
     </div>
   );
 }
