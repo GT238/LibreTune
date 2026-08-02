@@ -581,7 +581,7 @@ fn set_constant_records_a_proposal_instead_of_writing_directly() {
 }
 
 #[test]
-fn execute_action_records_an_unapplied_proposal() {
+fn execute_action_records_an_unapplied_proposal_and_says_so() {
     let wat = r#"
         (module
             (import "env" "execute_action" (func $execute_action (param i32 i32) (result i32)))
@@ -600,7 +600,19 @@ fn execute_action_records_an_unapplied_proposal() {
     let result = instance
         .execute(PluginDataSnapshot::default())
         .expect("execute failed");
-    assert_eq!(result.result_code, Some(0));
+    // Must NOT be host_result::OK (0) — the whole point is that a plugin
+    // can tell "recorded" apart from "actually ran". See
+    // host_result::ACCEPTED_NOT_EXECUTED's doc comment.
+    assert_eq!(
+        result.result_code,
+        Some(1),
+        "execute_action must return ACCEPTED_NOT_EXECUTED, not OK, since nothing actually executes"
+    );
+    assert_ne!(
+        result.result_code,
+        Some(0),
+        "a plugin must never see success (0) for an action that will never run"
+    );
     assert_eq!(
         result.proposals,
         vec![PluginProposal::ExecuteAction {

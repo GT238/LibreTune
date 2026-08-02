@@ -50,6 +50,10 @@ pub async fn load_ini(
             // incompatible data into the same log. See
             // stop_recording_on_definition_change for details.
             crate::commands::data_logging::stop_recording_on_definition_change(&state).await;
+            // Same problem for a running realtime stream: its cached
+            // output-channel layout/endianness would go stale. See
+            // stop_streaming_on_definition_change for details.
+            crate::commands::realtime_stream::stop_streaming_on_definition_change(&state).await;
 
             // Cache output channels to avoid repeated cloning in realtime streaming loop
             let mut channels_cache_guard = state.cached_output_channels.lock().await;

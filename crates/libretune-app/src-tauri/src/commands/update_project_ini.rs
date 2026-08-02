@@ -39,6 +39,7 @@ pub async fn update_project_ini(
     *def_guard = Some(new_def);
     drop(def_guard);
     crate::commands::data_logging::stop_recording_on_definition_change(&state).await;
+    crate::commands::realtime_stream::stop_streaming_on_definition_change(&state).await;
 
     // Update settings with new INI path
     let mut settings = load_settings(&app);

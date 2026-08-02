@@ -247,7 +247,13 @@ pub fn api_get_constant(
 /// * `value_bytes` - Raw bytes to write
 ///
 /// # Returns
-/// ApiResponse with success or error
+/// ApiResponse indicating whether the write is authorized. This function
+/// only checks permission — it does not write anything itself. The actual
+/// write happens after the plugin's synchronous run finishes: the caller
+/// (`plugin_system`'s `set_constant` host function) records a
+/// `PluginProposal::SetConstant` on success here, and `execute_wasm_plugin`
+/// applies it afterward via the real `update_constant` command, the same
+/// path a user-driven edit takes.
 pub fn api_set_constant(
     granted: &[Permission],
     _constant_name: &str,
@@ -257,7 +263,6 @@ pub fn api_set_constant(
         return ApiResponse::permission_denied("WriteConstants");
     }
 
-    // Implementation would write to tune cache
     ApiResponse::ok_empty()
 }
 
@@ -329,13 +334,20 @@ pub fn api_get_channel_value(
 /// * `action_json` - JSON-encoded action data
 ///
 /// # Returns
-/// ApiResponse with execution result or error
+/// ApiResponse indicating whether the permission check passed — **not**
+/// whether the action was executed. LibreTune's action-scripting engine
+/// (`action_scripting::Action`/`ActionPlayer`) is validation-only today,
+/// with no generic "run this one action now" dispatcher to call into, so
+/// nothing here ever actually executes the action. The caller
+/// (`plugin_system`'s `execute_action` host function) reflects this
+/// honestly at the wire level: it returns `host_result::ACCEPTED_NOT_EXECUTED`
+/// rather than `host_result::OK` on this path, so a plugin can't mistake
+/// "permission granted, proposal recorded" for "actually ran."
 pub fn api_execute_action(granted: &[Permission], _action_json: &str) -> ApiResponse {
     if !granted.contains(&Permission::ExecuteActions) {
         return ApiResponse::permission_denied("ExecuteActions");
     }
 
-    // Implementation would parse JSON and execute action
     ApiResponse::ok_empty()
 }
 
