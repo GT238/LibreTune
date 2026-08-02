@@ -514,6 +514,8 @@ export default function TableGrid({
                     ${isSelected ? 'selected' : ''} 
                     ${isLocked ? 'locked' : ''}
                   `}
+                  data-x={x}
+                  data-y={y}
                   style={getCellColor(value, x, y)}
                   onMouseDown={e => handleCellMouseDown(e, x, y)}
                   onDoubleClick={() => onCellDoubleClick?.(x, y)}

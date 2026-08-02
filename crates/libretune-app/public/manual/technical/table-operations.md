@@ -2,6 +2,26 @@
 
 LibreTune provides several mathematical operations for manipulating 2D and 3D table data. These operations are implemented in the core library for consistency and tested for correctness.
 
+## Editor Controls
+
+Select a cell or drag a rectangular selection before applying an operation.
+
+| Control | Action |
+| --- | --- |
+| `=` | Set selected cells to their average value |
+| `>` or `.` | Increase selected cells by 1% (`Ctrl`/`Cmd`: 5%) |
+| `<`, `,`, `-`, or `_` | Decrease selected cells by 1% (`Ctrl`/`Cmd`: 5%) |
+| `+` | Increase selected cells by 10% (`Ctrl`/`Cmd`: 50%) |
+| `*` | Open the scale-factor dialog |
+| `/` | Interpolate between the selected region's corner cells |
+| `s` | Smooth selected cells |
+| `Page Up` / `Page Down` | Add or subtract 0.1 (`Shift`: 1; `Ctrl`/`Cmd`: 0.05) |
+
+Scaling multiplies each selected value by the entered factor: use `1.05` for a
+5% increase or `0.95` for a 5% decrease. Right-clicking a cell opens the
+context menu for that cell; when it is outside the current selection, it
+becomes the active selection before an operation runs.
+
 ## Interpolation
 
 ### Bilinear Interpolation (2D Tables)

@@ -13,6 +13,42 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-01 — Table editing operations restored
+
+#### Fixed
+- **All table modifying operations failed silently-ish with "invalid args"** —
+  every table op in `TableEditor2D` (`set_cells_equal`, `scale_cells`,
+  `smooth_table`, `interpolate_cells`, `interpolate_linear`, `add_offset`,
+  `fill_region`, `rebin_table`) passed its `invoke` arguments in snake_case
+  (`table_name`, `selected_cells`, `scale_factor`, …). Tauri 2 expects
+  camelCase keys and converts them to the Rust `snake_case` parameters, so it
+  rejected every payload before the command body ran — e.g. *"invalid args
+  `tableName` for command `scale_cells`: command scale_cells missing required
+  key tableName"*. Scaling, smoothing, interpolation, fill and re-bin were all
+  dead. Plain cell edits/paste/undo kept working because `update_table_data`
+  was already using camelCase.
+- **`>` / `<` / `+` multiplied cell values instead of nudging them** — the
+  keyboard handler and toolbar buttons passed a raw multiplier (`1`, or `5`
+  with Ctrl) to `handleIncrease`/`handleDecrease`, which compute
+  `value * (1 ± amount)`. Pressing `>` doubled every selected cell and `+` made
+  it 11×. They now step by 1% (5% with Ctrl, 10% for `+`).
+- **Scale (`*` / toolbar) was a guaranteed no-op** — both entry points called
+  `handleScale(1.0)`. They now open a dialog prompting for the multiplier;
+  only the right-click menu previously supplied a real factor.
+- **Right-click context menu targeted the wrong cell** — `TableGrid` never
+  emitted the `data-x`/`data-y` attributes that `TableEditor2D`'s
+  `onContextMenu` handler read, so Lock/Unlock and the menu header always
+  resolved to cell `(0, 0)`. The handler also required the event target to
+  *be* the `.table-cell` element, but right-clicking the number hits the inner
+  value span, so the menu often didn't open at all. The cells now carry their
+  coordinates, the handler walks up with `closest()`, and a right-click
+  outside the current selection moves the selection to the clicked cell (the
+  menu's other actions all operate on the selection).
+
+#### Added
+- Regression tests asserting the `invoke` argument keys for each table
+  operation, so camelCase/snake_case drift can't silently break editing again.
+
 ### 2026-07-31 — Dashboard validation loop + Settings save performance/reliability
 
 Fixes a runaway backend loop that starved the UI, plus several Settings-save
