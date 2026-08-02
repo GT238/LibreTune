@@ -39,6 +39,7 @@ pub async fn create_project(
     *def_guard = Some(def.clone());
     drop(def_guard);
     crate::commands::data_logging::stop_recording_on_definition_change(&state).await;
+    crate::commands::realtime_stream::stop_streaming_on_definition_change(&state).await;
 
     // Initialize TuneCache from definition
     let cache = TuneCache::from_definition(&def);
@@ -254,6 +255,7 @@ pub async fn open_project(
     *def_guard = Some(def);
     drop(def_guard);
     crate::commands::data_logging::stop_recording_on_definition_change(&state).await;
+    crate::commands::realtime_stream::stop_streaming_on_definition_change(&state).await;
 
     // Save project path before moving project into mutex
     let project_path = project.path.clone();
