@@ -312,8 +312,10 @@ pub async fn import_tune_from_csv(
                 cache.write_bytes(constant.page, offset, &bytes);
             }
 
-            tune.constants
-                .insert(name.to_string(), TuneValue::Array(values));
+            tune.constants.insert(
+                name.to_string(),
+                TuneValue::Array(truncate_imported_array(values, elem_count)),
+            );
             import_count += 1;
             continue;
         }
@@ -391,9 +393,13 @@ pub(crate) fn parse_csv_line(line: &str) -> Vec<&str> {
     let mut fields = Vec::new();
     let mut start = 0;
     let mut in_quotes = false;
-    let chars: Vec<char> = line.chars().collect();
 
-    for (i, &ch) in chars.iter().enumerate() {
+    // Use char_indices() so `i` is a byte offset into `line` (matching what
+    // `line[start..i]` needs) instead of a char-count index — indexing by
+    // char position and then slicing the str by byte range panics as soon as
+    // any multi-byte UTF-8 character (e.g. the "°" used in some INI units)
+    // appears before a delimiter.
+    for (i, ch) in line.char_indices() {
         if ch == '"' {
             in_quotes = !in_quotes;
         } else if ch == ',' && !in_quotes {
@@ -405,7 +411,7 @@ pub(crate) fn parse_csv_line(line: &str) -> Vec<&str> {
             } else {
                 fields.push(trimmed);
             }
-            start = i + 1;
+            start = i + ch.len_utf8();
         }
     }
 
@@ -447,5 +453,71 @@ pub(crate) fn encode_constant_value(raw_value: f64, data_type: &DataType) -> Vec
         DataType::Bits | DataType::String => {
             vec![raw_value.clamp(0.0, 255.0) as u8]
         }
+    }
+}
+
+/// Truncate an imported array-constant's values to `elem_count` so
+/// `tune.constants` stays consistent with what actually gets written to
+/// cache — a CSV containing more values than the constant's defined size
+/// should not leave an oversized array in memory.
+pub(crate) fn truncate_imported_array(mut values: Vec<f64>, elem_count: usize) -> Vec<f64> {
+    values.truncate(values.len().min(elem_count));
+    values
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_csv_line_splits_ascii_fields() {
+        let fields = parse_csv_line("foo,1,2,bar");
+        assert_eq!(fields, vec!["foo", "1", "2", "bar"]);
+    }
+
+    #[test]
+    fn parse_csv_line_handles_quoted_fields_with_commas() {
+        let fields = parse_csv_line(r#"name,"[1,2,3]",units"#);
+        assert_eq!(fields, vec!["name", "[1,2,3]", "units"]);
+    }
+
+    #[test]
+    fn parse_csv_line_does_not_panic_on_multibyte_utf8_before_delimiter() {
+        // Regression test: demo.ini ships constants with units like "gear N°"
+        // (e.g. torqueReductionCutGearBins). Exporting a tune with such a
+        // constant, then re-importing that CSV, used to panic because the
+        // old parser mixed a char-index loop counter with byte-index string
+        // slicing — any multi-byte UTF-8 char before a comma corrupted the
+        // byte offset used to slice the &str.
+        let fields = parse_csv_line(
+            "torqueReductionCutGearBins,21,58,[2],\"[1,2]\",gear N°,0,20,1,0,S08,false",
+        );
+        assert_eq!(fields[0], "torqueReductionCutGearBins");
+        assert_eq!(fields[5], "gear N°");
+        assert_eq!(fields[11], "false");
+    }
+
+    #[test]
+    fn parse_csv_line_handles_multibyte_utf8_immediately_before_delimiter() {
+        // Delimiter directly follows the multi-byte char (no ASCII buffer),
+        // which is the tightest case for a char/byte index mismatch to panic.
+        let fields = parse_csv_line("N°,next");
+        assert_eq!(fields, vec!["N°", "next"]);
+    }
+
+    #[test]
+    fn truncate_imported_array_leaves_undersized_arrays_untouched() {
+        assert_eq!(truncate_imported_array(vec![1.0, 2.0], 4), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn truncate_imported_array_truncates_oversized_arrays_to_elem_count() {
+        // A CSV hand-edited (or from a mismatched INI) to have more values
+        // than the constant's defined shape must not leave tune.constants
+        // holding an array longer than what was actually written to cache.
+        assert_eq!(
+            truncate_imported_array(vec![1.0, 2.0, 3.0, 4.0, 5.0], 3),
+            vec![1.0, 2.0, 3.0]
+        );
     }
 }
