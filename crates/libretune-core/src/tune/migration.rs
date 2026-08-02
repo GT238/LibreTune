@@ -23,6 +23,12 @@ pub struct MigrationReport {
     /// Constants whose scale/translate changed (may affect values)
     pub scale_changed: Vec<ConstantChange>,
 
+    /// Constants whose page/offset moved but type and scale/translate are
+    /// unchanged. The app already applies constants by name against the
+    /// current definition's page/offset, so this doesn't affect the values
+    /// that get written — it's purely informational.
+    pub location_changed: Vec<ConstantChange>,
+
     /// True if all changes can be auto-migrated safely
     pub can_auto_migrate: bool,
 
@@ -65,6 +71,7 @@ impl MigrationReport {
             missing_in_ini: Vec::new(),
             type_changed: Vec::new(),
             scale_changed: Vec::new(),
+            location_changed: Vec::new(),
             can_auto_migrate: true,
             requires_user_review: false,
             severity: "none".to_string(),
@@ -77,6 +84,7 @@ impl MigrationReport {
             || !self.missing_in_ini.is_empty()
             || !self.type_changed.is_empty()
             || !self.scale_changed.is_empty()
+            || !self.location_changed.is_empty()
     }
 
     /// Get a summary of the changes
@@ -94,6 +102,9 @@ impl MigrationReport {
         }
         if !self.scale_changed.is_empty() {
             parts.push(format!("{} scale changes", self.scale_changed.len()));
+        }
+        if !self.location_changed.is_empty() {
+            parts.push(format!("{} location changes", self.location_changed.len()));
         }
 
         if parts.is_empty() {
@@ -176,6 +187,26 @@ pub fn compare_manifests(
                     ),
                 });
             }
+            // Check if page/offset moved (type and scale/translate unchanged)
+            else if entry.page != current.page || entry.offset != current.offset {
+                report.location_changed.push(ConstantChange {
+                    name: entry.name.clone(),
+                    old_type: entry.data_type.clone(),
+                    old_page: entry.page,
+                    old_offset: entry.offset,
+                    old_scale: entry.scale,
+                    old_translate: entry.translate,
+                    new_type: current_type,
+                    new_page: current.page,
+                    new_offset: current.offset,
+                    new_scale: current.scale,
+                    new_translate: current.translate,
+                    change_description: format!(
+                        "Moved from page {} offset {} to page {} offset {}",
+                        entry.page, entry.offset, current.page, current.offset
+                    ),
+                });
+            }
         } else {
             // Constant was in tune but not in current INI
             report.missing_in_ini.push(entry.name.clone());
@@ -191,8 +222,10 @@ pub fn compare_manifests(
         report.requires_user_review = true;
         report.can_auto_migrate = true;
         report.severity = "medium".to_string();
-    } else if !report.missing_in_tune.is_empty() {
-        // Only new constants - can auto-apply defaults
+    } else if !report.missing_in_tune.is_empty() || !report.location_changed.is_empty() {
+        // Only new constants and/or page/offset moves - values are either
+        // defaulted or already applied correctly by name, so this can
+        // auto-migrate without review.
         report.can_auto_migrate = true;
         report.requires_user_review = false;
         report.severity = "low".to_string();
@@ -225,5 +258,84 @@ mod tests {
         let summary = report.summary();
         assert!(summary.contains("2 new constants"));
         assert!(summary.contains("1 removed constants"));
+    }
+
+    #[test]
+    fn test_location_change_detected_when_type_and_scale_unchanged() {
+        // Regression test: a constant whose page/offset moved between INI
+        // versions, with type and scale/translate unchanged, must not be
+        // silently invisible to the report.
+        use crate::ini::Constant;
+
+        let manifest = vec![ConstantManifestEntry {
+            name: "egoCorrection".to_string(),
+            data_type: "U08".to_string(),
+            page: 3,
+            offset: 50,
+            scale: 1.0,
+            translate: 0.0,
+        }];
+
+        let mut def = EcuDefinition::default();
+        def.constants.insert(
+            "egoCorrection".to_string(),
+            Constant {
+                name: "egoCorrection".to_string(),
+                page: 5,
+                offset: 100,
+                ..Constant::default()
+            },
+        );
+
+        let report = compare_manifests(&manifest, &def);
+
+        assert!(report.has_changes());
+        assert_eq!(report.location_changed.len(), 1);
+        assert!(report.type_changed.is_empty());
+        assert!(report.scale_changed.is_empty());
+        assert_eq!(report.severity, "low");
+        assert!(report.can_auto_migrate);
+        assert!(!report.requires_user_review);
+
+        let change = &report.location_changed[0];
+        assert_eq!(change.old_page, 3);
+        assert_eq!(change.old_offset, 50);
+        assert_eq!(change.new_page, 5);
+        assert_eq!(change.new_offset, 100);
+    }
+
+    #[test]
+    fn test_type_change_takes_precedence_over_location_change() {
+        // If type AND location both changed, the constant should be
+        // classified as a type change (higher severity), not a location
+        // change — matching the existing type-vs-scale precedence.
+        use crate::ini::{Constant, DataType};
+
+        let manifest = vec![ConstantManifestEntry {
+            name: "rpmLimit".to_string(),
+            data_type: "U08".to_string(),
+            page: 3,
+            offset: 50,
+            scale: 1.0,
+            translate: 0.0,
+        }];
+
+        let mut def = EcuDefinition::default();
+        def.constants.insert(
+            "rpmLimit".to_string(),
+            Constant {
+                name: "rpmLimit".to_string(),
+                page: 5,
+                offset: 100,
+                data_type: DataType::U16,
+                ..Constant::default()
+            },
+        );
+
+        let report = compare_manifests(&manifest, &def);
+
+        assert_eq!(report.type_changed.len(), 1);
+        assert!(report.location_changed.is_empty());
+        assert_eq!(report.severity, "high");
     }
 }

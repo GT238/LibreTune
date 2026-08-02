@@ -13,6 +13,7 @@ import {
   Minus,
   RefreshCw,
   Scale,
+  Move,
   ChevronDown,
   ChevronRight,
   Check,
@@ -25,6 +26,8 @@ export interface ConstantChange {
   name: string;
   old_type?: string;
   new_type?: string;
+  old_page?: number;
+  new_page?: number;
   old_scale?: number;
   new_scale?: number;
   old_offset?: number;
@@ -38,6 +41,7 @@ export interface MigrationReport {
   missing_in_ini: string[];
   type_changed: ConstantChange[];
   scale_changed: ConstantChange[];
+  location_changed: ConstantChange[];
   can_auto_migrate: boolean;
   requires_user_review: boolean;
   severity: "none" | "low" | "medium" | "high";
@@ -257,6 +261,40 @@ export default function MigrationReportDialog({
                           <span className="change-detail">
                             scale: {c.old_scale?.toFixed(4)} →{" "}
                             {c.new_scale?.toFixed(4)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {/* Location changes (page/offset moved, type/scale unchanged) */}
+              {report.location_changed.length > 0 && (
+                <div className="migration-section info">
+                  <button
+                    className="section-header"
+                    onClick={() => toggleSection("location")}
+                  >
+                    {expandedSections.has("location") ? (
+                      <ChevronDown size={16} />
+                    ) : (
+                      <ChevronRight size={16} />
+                    )}
+                    <Move size={16} className="section-icon" />
+                    <span className="section-title">
+                      Storage Location Changed ({report.location_changed.length})
+                    </span>
+                    <span className="section-badge info">Handled Automatically</span>
+                  </button>
+                  {expandedSections.has("location") && (
+                    <ul className="change-list">
+                      {report.location_changed.map((c) => (
+                        <li key={c.name}>
+                          <code>{c.name}</code>
+                          <span className="change-detail">
+                            page {c.old_page}/offset {c.old_offset} → page {c.new_page}
+                            /offset {c.new_offset}
                           </span>
                         </li>
                       ))}
