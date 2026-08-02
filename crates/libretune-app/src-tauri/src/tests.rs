@@ -172,16 +172,12 @@ mod concurrency_tests {
         assert!(joined.is_ok(), "Tasks deadlocked or timed out");
     }
 
-    /// Regression test (2026-08-01) for update_curve_data holding
-    /// `state.definition` across a blocking ECU write. Simulates that
-    /// shape directly: one task holds `definition` only long enough to
-    /// snapshot what it needs then drops it before a slow "ECU write"
-    /// (matching the fixed update_curve_data), while a second task tries to
-    /// read `definition` during that slow window. Before the fix, the
-    /// second task would have blocked for the entire simulated I/O
-    /// duration; after the fix it should complete almost immediately.
-    #[tokio::test]
-    async fn test_definition_available_during_slow_curve_write() {
+    /// Shared AppState fixture for the lock-holding regression tests below
+    /// — all three simulate the exact shape of the bugs found in
+    /// update_curve_data, update_table_data, and update_constant_string
+    /// (2026-08-01): snapshot from `definition`, drop it, then do slow
+    /// "ECU write" work.
+    fn build_state_for_lock_tests() -> Arc<AppState> {
         let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("demo.ini");
@@ -189,7 +185,7 @@ mod concurrency_tests {
         let def =
             EcuDefinition::from_file(dev_path.to_string_lossy().as_ref()).expect("Load demo INI");
 
-        let state = Arc::new(AppState {
+        Arc::new(AppState {
             connection: Mutex::new(Some(Connection::new(ConnectionConfig::default()))),
             definition: Mutex::new(Some(def)),
             autotune_state: Mutex::new(AutoTuneState::new()),
@@ -218,7 +214,20 @@ mod concurrency_tests {
             math_channels: Mutex::new(Vec::new()),
             stream_stats: Mutex::new(StreamStats::default()),
             agent_task: Mutex::new(None),
-        });
+        })
+    }
+
+    /// Regression test (2026-08-01) for update_curve_data holding
+    /// `state.definition` across a blocking ECU write. Simulates that
+    /// shape directly: one task holds `definition` only long enough to
+    /// snapshot what it needs then drops it before a slow "ECU write"
+    /// (matching the fixed update_curve_data), while a second task tries to
+    /// read `definition` during that slow window. Before the fix, the
+    /// second task would have blocked for the entire simulated I/O
+    /// duration; after the fix it should complete almost immediately.
+    #[tokio::test]
+    async fn test_definition_available_during_slow_curve_write() {
+        let state = build_state_for_lock_tests();
 
         // Simulates the fixed update_curve_data: snapshot from `definition`,
         // drop it, then do slow "ECU write" work without holding it.
@@ -247,6 +256,77 @@ mod concurrency_tests {
             reader.is_ok(),
             "definition lock was unavailable during the simulated slow write — \
              the lock-held-across-I/O bug is back"
+        );
+        assert!(reader.unwrap());
+
+        writer.await.expect("writer task panicked");
+    }
+
+    /// Regression test (2026-08-01) for update_table_data holding
+    /// `state.definition` across a blocking ECU write — the primary
+    /// table-cell-edit command (the main table editor calls this on every
+    /// cell edit), so this is likely the highest-traffic command that had
+    /// this bug.
+    #[tokio::test]
+    async fn test_definition_available_during_slow_table_write() {
+        let state = build_state_for_lock_tests();
+
+        let writer_state = state.clone();
+        let writer = tokio::spawn(async move {
+            {
+                let def_guard = writer_state.definition.lock().await;
+                let _endianness = def_guard.as_ref().map(|d| d.endianness);
+            } // definition lock released here, before the slow part
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let reader_state = state.clone();
+        let reader = tokio::time::timeout(Duration::from_millis(100), async move {
+            let def_guard = reader_state.definition.lock().await;
+            def_guard.is_some()
+        })
+        .await;
+
+        assert!(
+            reader.is_ok(),
+            "definition lock was unavailable during the simulated slow table write"
+        );
+        assert!(reader.unwrap());
+
+        writer.await.expect("writer task panicked");
+    }
+
+    /// Regression test (2026-08-01) for update_constant_string holding
+    /// `state.definition` across a blocking ECU write. Also exercised by
+    /// LuaConsole's "Upload + Burn + Reset" flow, not just direct
+    /// string-constant edits.
+    #[tokio::test]
+    async fn test_definition_available_during_slow_string_constant_write() {
+        let state = build_state_for_lock_tests();
+
+        let writer_state = state.clone();
+        let writer = tokio::spawn(async move {
+            {
+                let def_guard = writer_state.definition.lock().await;
+                let _page_sizes_len = def_guard.as_ref().map(|d| d.page_sizes.len());
+            } // definition lock released here, before the slow part
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let reader_state = state.clone();
+        let reader = tokio::time::timeout(Duration::from_millis(100), async move {
+            let def_guard = reader_state.definition.lock().await;
+            def_guard.is_some()
+        })
+        .await;
+
+        assert!(
+            reader.is_ok(),
+            "definition lock was unavailable during the simulated slow string-constant write"
         );
         assert!(reader.unwrap());
 
