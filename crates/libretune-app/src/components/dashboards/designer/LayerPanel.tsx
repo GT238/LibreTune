@@ -4,11 +4,21 @@
  * Lists every component on the dashboard and lets the user:
  *  - select/focus a component (single-click)
  *  - reorder z-stack (▲/▼ buttons; later index = drawn on top)
- *  - toggle visibility via an `enabled_condition` of "false" / cleared
+ *  - toggle visibility via `enabled_condition`
  *  - delete
  *
  * Z-ordering uses the array order in `gauge_cluster.components` since
  * the dashboard renders strictly in that sequence.
+ *
+ * `enabled_condition` is also a real, user-facing field (set via
+ * PropertyEditor's "Enabled Condition" input, e.g. "hasLambdaSensor" or
+ * "rpm > 0") for conditional visibility at runtime. The Hide/Show toggle
+ * here reuses that same field as a simple boolean by overwriting it to the
+ * literal string "false" — so hiding a component that already had a real
+ * condition must stash the original away first (round-tripped through
+ * `extra_attrs`, same mechanism PropertyEditor's TrendSeriesEditor uses for
+ * its own non-schema fields) and restore it on Show, instead of silently
+ * destroying it.
  */
 
 import { DashFile, DashComponent, isGauge, isIndicator } from '../dashTypes';
@@ -38,19 +48,50 @@ function componentKind(c: DashComponent): string {
   return '';
 }
 
-function isHidden(c: DashComponent): boolean {
-  const cond = isGauge(c)
-    ? c.Gauge.enabled_condition
-    : isIndicator(c)
-      ? c.Indicator.enabled_condition
-      : null;
-  return cond?.trim().toLowerCase() === 'false';
+const HIDDEN_MARKER = 'false';
+const SAVED_CONDITION_KEY = 'lt_prev_enabled_condition';
+
+function getCondition(c: DashComponent): string | null {
+  if (isGauge(c)) return c.Gauge.enabled_condition ?? null;
+  if (isIndicator(c)) return c.Indicator.enabled_condition ?? null;
+  return null;
 }
 
-function withHidden(c: DashComponent, hidden: boolean): DashComponent {
-  const cond = hidden ? 'false' : null;
-  if (isGauge(c)) return { Gauge: { ...c.Gauge, enabled_condition: cond } };
-  if (isIndicator(c)) return { Indicator: { ...c.Indicator, enabled_condition: cond } };
+function getExtraAttrs(c: DashComponent): Record<string, string> {
+  if (isGauge(c)) return c.Gauge.extra_attrs ?? {};
+  if (isIndicator(c)) return c.Indicator.extra_attrs ?? {};
+  return {};
+}
+
+export function isHidden(c: DashComponent): boolean {
+  return getCondition(c)?.trim().toLowerCase() === HIDDEN_MARKER;
+}
+
+export function withHidden(c: DashComponent, hidden: boolean): DashComponent {
+  const currentCondition = getCondition(c);
+  const attrs = { ...getExtraAttrs(c) };
+
+  let nextCondition: string | null;
+  if (hidden) {
+    // Stash whatever real condition (if any) was set before overwriting it
+    // with the hide marker, so Show can restore it exactly instead of
+    // always resetting to "always visible". Skip this if it's already the
+    // hide marker (already hidden -- nothing new to preserve).
+    if (currentCondition?.trim().toLowerCase() !== HIDDEN_MARKER) {
+      if (currentCondition) {
+        attrs[SAVED_CONDITION_KEY] = currentCondition;
+      } else {
+        delete attrs[SAVED_CONDITION_KEY];
+      }
+    }
+    nextCondition = HIDDEN_MARKER;
+  } else {
+    nextCondition = attrs[SAVED_CONDITION_KEY] ?? null;
+    delete attrs[SAVED_CONDITION_KEY];
+  }
+
+  if (isGauge(c)) return { Gauge: { ...c.Gauge, enabled_condition: nextCondition, extra_attrs: attrs } };
+  if (isIndicator(c)) return { Indicator: { ...c.Indicator, enabled_condition: nextCondition, extra_attrs: attrs } };
   return c;
 }
 
