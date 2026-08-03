@@ -3796,10 +3796,16 @@ afterBits = scalar, U08, lastOffset, "counts", 1.0, 0.0, 0, 255, 0
 
     let def = parse_ini(content).expect("Should parse successfully");
 
-    let flags = def.constants.get("flagsByte").expect("flagsByte should exist");
+    let flags = def
+        .constants
+        .get("flagsByte")
+        .expect("flagsByte should exist");
     assert_eq!(flags.offset, 100);
 
-    let after = def.constants.get("afterBits").expect("afterBits should exist");
+    let after = def
+        .constants
+        .get("afterBits")
+        .expect("afterBits should exist");
     assert_eq!(
         after.offset, 100,
         "a field right after a bits field must share its offset (bits are packed), not offset+1"
@@ -3828,10 +3834,16 @@ afterString = scalar, U08, lastOffset, "counts", 1.0, 0.0, 0, 255, 0
 
     let def = parse_ini(content).expect("Should parse successfully");
 
-    let name = def.constants.get("vehicleName").expect("vehicleName should exist");
+    let name = def
+        .constants
+        .get("vehicleName")
+        .expect("vehicleName should exist");
     assert_eq!(name.offset, 200);
 
-    let after = def.constants.get("afterString").expect("afterString should exist");
+    let after = def
+        .constants
+        .get("afterString")
+        .expect("afterString should exist");
     assert_eq!(
         after.offset, 216,
         "a field right after a 16-byte string must start at offset+16 (200+16), not alias the string's own bytes"
