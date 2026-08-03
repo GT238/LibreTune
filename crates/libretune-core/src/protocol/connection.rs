@@ -127,6 +127,38 @@ fn strip_status_byte(payload: &[u8], expected_data_len: usize, label: &str) -> V
     }
 }
 
+/// Inspect a modern-protocol write response for an ECU-reported error status.
+///
+/// Per msEnvelope_1.0 §15.2, every reply frame's first payload byte is a
+/// response code. `write_memory` used to discard the response entirely once
+/// its CRC checked out, so a write the ECU rejected (out of range, flash
+/// locked, busy, settings refused) was silently reported to the rest of the
+/// app as a success. Mirrors the same status-byte check already used for
+/// console command ('E') responses in `send_console_command_modern`.
+///
+/// An empty payload is treated as success rather than an error: some
+/// ECU/INI combinations don't echo a status byte on write acks at all (the
+/// same leniency `strip_status_byte` already applies on the read side), and
+/// the CRC already confirmed the frame arrived intact.
+fn check_write_response_status(response: &Packet) -> Result<(), ProtocolError> {
+    let Some(&status) = response.payload.first() else {
+        return Ok(());
+    };
+    let code = super::ResponseCode::from_byte(status);
+    if !code.is_error() {
+        return Ok(());
+    }
+    let message = if code.carries_payload_message() && response.payload.len() > 1 {
+        String::from_utf8_lossy(&response.payload[1..]).into_owned()
+    } else {
+        code.message().to_string()
+    };
+    Err(ProtocolError::EcuStatusError {
+        code: status,
+        message,
+    })
+}
+
 /// Drain up to `remaining` bytes from the channel within `deadline`, discarding all data.
 ///
 /// Called after a partial-read timeout inside `send_packet` to flush the rest of the
@@ -1657,8 +1689,8 @@ impl Connection {
         let result = if self.use_modern_protocol {
             // Modern protocol: wrap in CRC packet
             let packet = Packet::new(cmd);
-            let _response = self.send_packet(packet)?;
-            Ok(())
+            let response = self.send_packet(packet)?;
+            check_write_response_status(&response)
         } else {
             // Legacy protocol: send raw command
             self.send_raw_command(&cmd)?;
@@ -2301,6 +2333,56 @@ mod tests {
         let conn = Connection::new(config);
         assert_eq!(conn.state(), ConnectionState::Disconnected);
         assert!(conn.signature().is_none());
+    }
+
+    #[test]
+    fn write_response_status_ok_on_empty_payload() {
+        // Some ECU/INI combos don't echo a status byte on write acks; the CRC
+        // already confirmed the frame arrived intact, so treat this as success
+        // rather than an error, matching strip_status_byte's read-side leniency.
+        let response = Packet::new(vec![]);
+        assert!(check_write_response_status(&response).is_ok());
+    }
+
+    #[test]
+    fn write_response_status_ok_on_success_code() {
+        let response = Packet::new(vec![0x00]); // ResponseCode::Ok
+        assert!(check_write_response_status(&response).is_ok());
+
+        let response = Packet::new(vec![0x00, 0xAB, 0xCD]); // Ok plus trailing echoed data
+        assert!(check_write_response_status(&response).is_ok());
+    }
+
+    #[test]
+    fn write_response_status_rejects_ecu_reported_error() {
+        // 0x84 = OutOfRange. Before this fix, write_memory discarded the
+        // response entirely and reported this write as Ok(()) regardless.
+        let response = Packet::new(vec![0x84]);
+        let err = check_write_response_status(&response).unwrap_err();
+        match err {
+            ProtocolError::EcuStatusError { code, message } => {
+                assert_eq!(code, 0x84);
+                assert_eq!(message, super::super::ResponseCode::OutOfRange.message());
+            }
+            other => panic!("expected EcuStatusError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn write_response_status_extracts_payload_message_for_generic_error() {
+        // 0x94 = GenericError, which per spec carries a user-readable message
+        // in the remaining payload bytes rather than using the default text.
+        let mut payload = vec![0x94];
+        payload.extend_from_slice(b"flash write failed");
+        let response = Packet::new(payload);
+        let err = check_write_response_status(&response).unwrap_err();
+        match err {
+            ProtocolError::EcuStatusError { code, message } => {
+                assert_eq!(code, 0x94);
+                assert_eq!(message, "flash write failed");
+            }
+            other => panic!("expected EcuStatusError, got {other:?}"),
+        }
     }
 
     #[test]
