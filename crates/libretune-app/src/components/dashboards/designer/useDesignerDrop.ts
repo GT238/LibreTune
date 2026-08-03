@@ -8,6 +8,27 @@ interface ChannelInfo {
   translate: number;
 }
 
+/** Default size for a gauge created by a canvas drop (both painter-tile and
+ * channel drops go through `createDefaultGaugeFromChannel`, which hardcodes
+ * this same size). Shared so the drop-position clamp in `onDrop` can derive
+ * its bounds from the actual size instead of a magic number that can drift
+ * out of sync with it. */
+const DEFAULT_DROP_SIZE = 0.2;
+
+/**
+ * Center a raw cursor-relative drop position on a DEFAULT_DROP_SIZE-sized
+ * gauge, then clamp so the gauge's far edge (not just its near edge) stays
+ * on-canvas. Extracted as a pure function so the clamping math is directly
+ * unit-testable without simulating a full DragEvent.
+ */
+export function clampDropPosition(rawRelX: number, rawRelY: number): { relX: number; relY: number } {
+  const halfSize = DEFAULT_DROP_SIZE / 2;
+  return {
+    relX: Math.max(0, Math.min(1 - DEFAULT_DROP_SIZE, rawRelX - halfSize)),
+    relY: Math.max(0, Math.min(1 - DEFAULT_DROP_SIZE, rawRelY - halfSize)),
+  };
+}
+
 /**
  * Build a default `TsGaugeConfig` populated from a channel drop event,
  * using INI-derived metadata when available.
@@ -67,8 +88,8 @@ export function createDefaultGaugeFromChannel(
     minor_ticks: 0,
     relative_x: relX,
     relative_y: relY,
-    relative_width: 0.2,
-    relative_height: 0.2,
+    relative_width: DEFAULT_DROP_SIZE,
+    relative_height: DEFAULT_DROP_SIZE,
     border_width: 1,
     shortest_size: 0,
     shape_locked_to_aspect: false,
@@ -130,12 +151,10 @@ export function useDesignerDrop({
       if (!dashFile) return;
 
       const rect = e.currentTarget.getBoundingClientRect();
-      let relX = (e.clientX - rect.left) / rect.width;
-      let relY = (e.clientY - rect.top) / rect.height;
+      const rawRelX = (e.clientX - rect.left) / rect.width;
+      const rawRelY = (e.clientY - rect.top) / rect.height;
 
-      // Offset to roughly center on cursor
-      relX = Math.max(0, Math.min(0.9, relX - 0.1));
-      relY = Math.max(0, Math.min(0.9, relY - 0.1));
+      let { relX, relY } = clampDropPosition(rawRelX, rawRelY);
 
       if (gridSnap > 0) {
         relX = snapToGrid(relX);
