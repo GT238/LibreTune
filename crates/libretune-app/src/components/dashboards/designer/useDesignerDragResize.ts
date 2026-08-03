@@ -199,19 +199,27 @@ export function useDesignerDragResize({
         // would drift. Same mirror logic for s (bottom) vs n (top).
         const handle = resizeState.handle;
         if (handle.includes('e')) newWidth = snapToGrid(resizeState.startWidth + deltaX);
-        if (handle.includes('w')) {
-          newWidth = snapToGrid(resizeState.startWidth - deltaX);
-          newX = snapToGrid(resizeState.startRelativeX + deltaX);
-        }
+        if (handle.includes('w')) newWidth = snapToGrid(resizeState.startWidth - deltaX);
         if (handle.includes('s')) newHeight = snapToGrid(resizeState.startHeight + deltaY);
-        if (handle.includes('n')) {
-          newHeight = snapToGrid(resizeState.startHeight - deltaY);
-          newY = snapToGrid(resizeState.startRelativeY + deltaY);
-        }
+        if (handle.includes('n')) newHeight = snapToGrid(resizeState.startHeight - deltaY);
 
         const minSize = 0.05;
         newWidth = Math.max(minSize, newWidth);
         newHeight = Math.max(minSize, newHeight);
+
+        // Derive x/y from the already-floor-clamped width/height instead of
+        // from the raw mouse delta, so the fixed edge (right edge for a west
+        // drag, bottom edge for a north drag) never drifts once minSize is
+        // hit. Computing x from the unclamped delta let the right/bottom edge
+        // keep sliding with the mouse even after width/height pinned at the
+        // floor, since x and width stopped moving in lockstep at that point.
+        if (handle.includes('w')) {
+          newX = snapToGrid(resizeState.startRelativeX + resizeState.startWidth - newWidth);
+        }
+        if (handle.includes('n')) {
+          newY = snapToGrid(resizeState.startRelativeY + resizeState.startHeight - newHeight);
+        }
+
         newX = Math.max(0, Math.min(1 - newWidth, newX));
         newY = Math.max(0, Math.min(1 - newHeight, newY));
 
