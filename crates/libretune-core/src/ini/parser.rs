@@ -1143,9 +1143,15 @@ fn parse_constants_entry(
     if let Some(mut constant) =
         parse_constant_line(clean_key, value, *current_page, *last_offset, help_text)
     {
-        // Update last_offset for next constant (offset + size in bytes)
-        let size = constant.data_type.size_bytes() as u16 * constant.shape.element_count() as u16;
-        *last_offset = constant.offset + size;
+        // Update last_offset for next constant (offset + size in bytes).
+        // Use Constant::size_bytes(), not a hand-rolled data_type * element_count
+        // calculation -- that duplicate used to disagree with it for two cases:
+        // bits fields are packed (0 extra bytes; the raw DataType::size_bytes()
+        // of 1 would wrongly burn a byte per bit field), and string fields need
+        // their length in bytes (the raw DataType::size_bytes() of 0 for
+        // "variable size" would wrongly advance by 0, aliasing whatever field
+        // came next onto the string's own bytes).
+        *last_offset = constant.offset + constant.size_bytes() as u16;
 
         // Resolve $references in bit_options
         if !constant.bit_options.is_empty() {
@@ -3765,5 +3771,81 @@ constOnPage0 = scalar, U16, 0, "ms", 1, 0, 0, 100, 1
     assert_eq!(
         c.page, 0,
         "INI 'page = 0' should remain as internal page 0 (saturating_sub prevents underflow)"
+    );
+}
+
+#[test]
+fn test_last_offset_after_bits_field_does_not_advance() {
+    // Regression test: bits fields are packed (they don't take their own
+    // byte), so lastOffset on the field right after a bits field must
+    // resolve to the SAME offset as that bits field, not offset+1.
+    let content = r#"
+[MegaTune]
+signature = "test 1.0"
+queryCommand = "Q"
+
+[TunerStudio]
+nPages = 1
+pageSize = 256
+
+[Constants]
+page = 1
+flagsByte = bits, U08, 100, [0:3], "A", "B"
+afterBits = scalar, U08, lastOffset, "counts", 1.0, 0.0, 0, 255, 0
+"#;
+
+    let def = parse_ini(content).expect("Should parse successfully");
+
+    let flags = def
+        .constants
+        .get("flagsByte")
+        .expect("flagsByte should exist");
+    assert_eq!(flags.offset, 100);
+
+    let after = def
+        .constants
+        .get("afterBits")
+        .expect("afterBits should exist");
+    assert_eq!(
+        after.offset, 100,
+        "a field right after a bits field must share its offset (bits are packed), not offset+1"
+    );
+}
+
+#[test]
+fn test_last_offset_after_string_field_advances_by_its_length() {
+    // Regression test: a string field's byte footprint is its declared
+    // length, so lastOffset on the field right after it must resolve to
+    // offset + length -- not alias onto the string's own bytes.
+    let content = r#"
+[MegaTune]
+signature = "test 1.0"
+queryCommand = "Q"
+
+[TunerStudio]
+nPages = 1
+pageSize = 256
+
+[Constants]
+page = 1
+vehicleName = string, ASCII, 200, 16
+afterString = scalar, U08, lastOffset, "counts", 1.0, 0.0, 0, 255, 0
+"#;
+
+    let def = parse_ini(content).expect("Should parse successfully");
+
+    let name = def
+        .constants
+        .get("vehicleName")
+        .expect("vehicleName should exist");
+    assert_eq!(name.offset, 200);
+
+    let after = def
+        .constants
+        .get("afterString")
+        .expect("afterString should exist");
+    assert_eq!(
+        after.offset, 216,
+        "a field right after a 16-byte string must start at offset+16 (200+16), not alias the string's own bytes"
     );
 }
