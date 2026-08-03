@@ -3,19 +3,31 @@
 use crate::paths::get_settings_path;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{self, Write};
+use std::path::Path;
 
 #[derive(Serialize, Deserialize, Default)]
 pub(crate) struct Settings {
+    #[serde(default)]
     pub(crate) last_ini_path: Option<String>,
-    pub(crate) units_system: String,     // "metric" or "imperial"
+    #[serde(default)]
+    pub(crate) units_system: String, // "metric" or "imperial"
+    #[serde(default)]
     pub(crate) auto_burn_on_close: bool, // Auto-burn toggle
+    #[serde(default)]
     pub(crate) gauge_snap_to_grid: bool, // Dashboard gauge snap to grid
-    pub(crate) gauge_free_move: bool,    // Dashboard gauge free move
-    pub(crate) gauge_lock: bool,         // Dashboard gauge lock in place
+    #[serde(default)]
+    pub(crate) gauge_free_move: bool, // Dashboard gauge free move
+    #[serde(default)]
+    pub(crate) gauge_lock: bool, // Dashboard gauge lock in place
     #[serde(default = "default_true")]
     pub(crate) auto_sync_gauge_ranges: bool, // Auto-sync gauge ranges from INI
+    #[serde(default)]
     pub(crate) indicator_column_count: String, // "auto" or number like "12"
+    #[serde(default)]
     pub(crate) indicator_fill_empty: bool, // Fill empty cells in last row
+    #[serde(default)]
     pub(crate) indicator_text_fit: String, // "scale" or "wrap"
 
     // Status bar channel configuration
@@ -225,9 +237,30 @@ pub(crate) fn save_settings(app: &tauri::AppHandle, settings: &Settings) {
     if let Some(parent) = settings_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(json) = serde_json::to_string_pretty(settings) {
-        let _ = std::fs::write(&settings_path, json);
+    if let Err(e) = write_settings_atomic(&settings_path, settings) {
+        eprintln!("[WARN] Failed to save settings: {}", e);
     }
+}
+
+/// Write `settings` to `path` atomically: serialize to a sibling `.tmp` file,
+/// flush it to disk, then rename it over the real path. A crash, kill, or
+/// power loss mid-write leaves either the old file or the fully-written new
+/// one — never a truncated/partial file — because `std::fs::write`'s
+/// truncate-then-write-in-place was exactly what could corrupt the file that
+/// every setting (AI keys, hotkeys, layout, everything) lives in, with no
+/// backup anywhere. `rename` onto an existing path is atomic on both
+/// Windows and Unix as long as source and destination are on the same
+/// volume, which a sibling file in the same directory always is.
+fn write_settings_atomic(path: &Path, settings: &Settings) -> io::Result<()> {
+    let json = serde_json::to_string_pretty(settings)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let tmp_path = path.with_extension("json.tmp");
+    {
+        let mut file = File::create(&tmp_path)?;
+        file.write_all(json.as_bytes())?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&tmp_path, path)
 }
 
 /// Helper exposed to extracted command modules: returns the commit message format string.
@@ -306,7 +339,7 @@ fn default_settings() -> Settings {
 pub(crate) fn load_settings(app: &tauri::AppHandle) -> Settings {
     let settings_path = get_settings_path(app);
     if let Ok(content) = std::fs::read_to_string(&settings_path) {
-        if let Ok(mut settings) = serde_json::from_str::<Settings>(&content) {
+        if let Some(mut settings) = parse_settings_or_backup(&settings_path, &content) {
             if settings.runtime_packet_mode.trim().is_empty() {
                 settings.runtime_packet_mode = default_runtime_packet_mode();
             }
@@ -319,4 +352,119 @@ pub(crate) fn load_settings(app: &tauri::AppHandle) -> Settings {
         s.runtime_packet_mode = default_runtime_packet_mode();
     }
     s
+}
+
+/// Parse `content` (the text of `path`) as `Settings`. On failure, renames
+/// `path` aside to `<path>.corrupt` instead of leaving the caller to
+/// silently fall back to all-defaults and then overwrite the unreadable
+/// original on the next save — that used to discard a corrupt settings file
+/// (and every preference in it) with no warning and no way to recover it.
+fn parse_settings_or_backup(path: &Path, content: &str) -> Option<Settings> {
+    match serde_json::from_str::<Settings>(content) {
+        Ok(settings) => Some(settings),
+        Err(e) => {
+            eprintln!(
+                "[WARN] settings.json failed to parse ({}); backing it up to {}.corrupt \
+                 instead of discarding it, and resetting to defaults for this session.",
+                e,
+                path.display()
+            );
+            let backup_path = path.with_extension("json.corrupt");
+            let _ = std::fs::rename(path, &backup_path);
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn default_settings_matches_serde_defaults_for_missing_fields() {
+        // The whole point of default_settings() is to mirror what serde
+        // produces when every field is absent (see its doc comment on the
+        // sidebar_visible incident). Parsing "{}" is the ground truth for
+        // that; if a field's #[serde(default...)] ever drifts from its
+        // hand-written value here, this catches it instead of silently
+        // shipping a divergence.
+        let from_empty_json: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            serde_json::to_string(&default_settings()).unwrap(),
+            serde_json::to_string(&from_empty_json).unwrap()
+        );
+    }
+
+    #[test]
+    fn write_settings_atomic_round_trips() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+
+        let mut settings = default_settings();
+        settings.units_system = "imperial".to_string();
+
+        write_settings_atomic(&path, &settings).expect("write should succeed");
+
+        // The .tmp sibling must not be left behind after a successful write.
+        assert!(!path.with_extension("json.tmp").exists());
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let loaded: Settings = serde_json::from_str(&content).unwrap();
+        assert_eq!(loaded.units_system, "imperial");
+    }
+
+    #[test]
+    fn parse_settings_or_backup_returns_settings_on_valid_json() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"units_system":"metric"}"#).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+
+        let result = parse_settings_or_backup(&path, &content);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().units_system, "metric");
+        // A successful parse must not touch the original file.
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn parse_settings_or_backup_preserves_corrupt_file_instead_of_discarding_it() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        // Simulates a crash/kill mid-write leaving truncated JSON.
+        std::fs::write(&path, r#"{"units_system":"metr"#).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+
+        let result = parse_settings_or_backup(&path, &content);
+        assert!(result.is_none());
+
+        // The corrupt file must survive under a backup name, not vanish.
+        assert!(!path.exists());
+        let backup_path = path.with_extension("json.corrupt");
+        assert!(backup_path.exists());
+        assert_eq!(
+            std::fs::read_to_string(&backup_path).unwrap(),
+            r#"{"units_system":"metr"#
+        );
+    }
+
+    #[test]
+    fn parse_settings_or_backup_tolerates_missing_originally_non_default_fields() {
+        // Before these fields got #[serde(default)], a settings.json missing
+        // any one of them (e.g. saved by an older version, or with the key
+        // manually removed) failed deserialization entirely and silently
+        // reset every other setting too. Confirm each now degrades to just
+        // that field's own default instead.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"auto_burn_on_close":true}"#).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+
+        let result = parse_settings_or_backup(&path, &content);
+        let settings = result.expect("missing fields should no longer break the whole parse");
+        assert!(settings.auto_burn_on_close);
+        assert_eq!(settings.last_ini_path, None);
+        assert_eq!(settings.units_system, "");
+    }
 }
