@@ -1,5 +1,6 @@
 import { DashComponent, TsGaugeConfig, TsIndicatorConfig, isGauge, isIndicator } from '../dashTypes';
 import PercentField from './PercentField';
+import NumberField from './NumberField';
 
 interface Props {
   component: DashComponent;
@@ -41,18 +42,18 @@ export default function PropertyEditor({ component, onChange }: Props) {
         <div className="property-row">
           <div className="property-group half">
             <label>Min</label>
-            <input
-              type="number"
+            <NumberField
+              label="Min"
               value={gauge.min}
-              onChange={(e) => updateGauge({ min: parseFloat(e.target.value) || 0 })}
+              onChange={(v) => updateGauge({ min: v ?? 0 })}
             />
           </div>
           <div className="property-group half">
             <label>Max</label>
-            <input
-              type="number"
+            <NumberField
+              label="Max"
               value={gauge.max}
-              onChange={(e) => updateGauge({ max: parseFloat(e.target.value) || 100 })}
+              onChange={(v) => updateGauge({ max: v ?? 100 })}
             />
           </div>
         </div>
@@ -69,18 +70,20 @@ export default function PropertyEditor({ component, onChange }: Props) {
         <div className="property-row">
           <div className="property-group half">
             <label>Warning</label>
-            <input
-              type="number"
-              value={gauge.high_warning ?? ''}
-              onChange={(e) => updateGauge({ high_warning: e.target.value ? parseFloat(e.target.value) : null })}
+            <NumberField
+              label="Warning"
+              value={gauge.high_warning}
+              nullable
+              onChange={(v) => updateGauge({ high_warning: v })}
             />
           </div>
           <div className="property-group half">
             <label>Critical</label>
-            <input
-              type="number"
-              value={gauge.high_critical ?? ''}
-              onChange={(e) => updateGauge({ high_critical: e.target.value ? parseFloat(e.target.value) : null })}
+            <NumberField
+              label="Critical"
+              value={gauge.high_critical}
+              nullable
+              onChange={(v) => updateGauge({ high_critical: v })}
             />
           </div>
         </div>
@@ -116,12 +119,13 @@ export default function PropertyEditor({ component, onChange }: Props) {
 
         <div className="property-group">
           <label>Digits</label>
-          <input
-            type="number"
+          <NumberField
+            label="Digits"
+            integer
             min={0}
             max={5}
             value={gauge.value_digits ?? 1}
-            onChange={(e) => updateGauge({ value_digits: parseInt(e.target.value) || 0 })}
+            onChange={(v) => updateGauge({ value_digits: v ?? 0 })}
           />
         </div>
 
@@ -197,14 +201,13 @@ export default function PropertyEditor({ component, onChange }: Props) {
             <label title="Channel-units deadband on warning/critical state transitions.">
               Hysteresis
             </label>
-            <input
-              type="number"
+            <NumberField
+              label="Hysteresis"
+              value={gauge.hysteresis}
+              nullable
               step={0.1}
-              value={gauge.hysteresis ?? ''}
               placeholder="0"
-              onChange={(e) =>
-                updateGauge({ hysteresis: e.target.value === '' ? null : parseFloat(e.target.value) })
-              }
+              onChange={(v) => updateGauge({ hysteresis: v })}
             />
           </div>
         </div>
