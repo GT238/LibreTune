@@ -983,6 +983,13 @@ fn log_stat_tile(spec: LogStatSpec) -> DashComponent {
         critical_color: LT_CRITICAL_COLOR,
         border_width: 1,
         font_size_adjustment: -1,
+        // These tiles are laid out densely by relative percentage; a nonzero
+        // shortest_size (GaugeConfig::default's fallback for parsing legacy
+        // files that omit the field) would force a pixel floor that fights
+        // that layout at smaller dashboard sizes, overflowing into
+        // neighboring tiles. See useDesignerDrop.ts's own default of 0 for
+        // freshly-placed, percentage-driven gauges.
+        shortest_size: 0,
         ..Default::default()
     }))
 }
@@ -1009,6 +1016,7 @@ fn log_sparkline(spec: LogSparkSpec) -> DashComponent {
         critical_color: LT_CRITICAL_COLOR,
         show_history: true,
         border_width: 1,
+        shortest_size: 0, // see log_stat_tile's comment
         ..Default::default()
     }))
 }
@@ -1059,6 +1067,7 @@ fn log_multi_trend(
         critical_color: LT_CRITICAL_COLOR,
         extra_attrs: log_series_attrs(extra),
         border_width: 1,
+        shortest_size: 0, // see log_stat_tile's comment
         ..Default::default()
     }))
 }
@@ -1864,4 +1873,34 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
 /// Backward-compatible alias — the old "F1 Telemetry" name pointed here.
 pub fn create_f1_telemetry_dashboard() -> DashFile {
     create_telemetry_live_dashboard()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: log_stat_tile/log_sparkline/log_multi_trend all rely
+    /// on `..Default::default()`, which sets shortest_size to 50 (a fallback
+    /// meant for parsing legacy files that omit the field, see
+    /// dash/types.rs's GaugeConfig::default). Left unset, that 50px floor
+    /// overrides these tiles' relative_width/height at smaller dashboard
+    /// sizes, forcing them to overflow their allotted box and overlap
+    /// neighboring tiles -- invisible on a large/maximized window (where
+    /// their percentage-based size already exceeds 50px), but reproducible
+    /// on any smaller one.
+    #[test]
+    fn test_telemetry_live_dashboard_tiles_have_no_shortest_size_floor() {
+        let dash = create_telemetry_live_dashboard();
+        for component in &dash.gauge_cluster.components {
+            if let DashComponent::Gauge(gauge) = component {
+                assert_eq!(
+                    gauge.shortest_size, 0,
+                    "component '{}' has a nonzero shortest_size, which clamps \
+                     it to a pixel floor that fights its relative-percentage \
+                     layout at smaller dashboard sizes",
+                    gauge.id
+                );
+            }
+        }
+    }
 }
