@@ -93,12 +93,22 @@ pub async fn delete_project(
     //
     // Fall back to the old name-joined path if the project is not in the list
     // (e.g. an unreadable `project.json`), preserving the previous behaviour.
-    let project_path = Project::list_projects()
-        .map_err(|e| format!("Failed to list projects: {}", e))?
-        .into_iter()
-        .find(|p| p.name == project_name)
-        .map(|p| p.path)
-        .unwrap_or_else(|| get_projects_dir(&app).join(&project_name));
+    if project_name.trim().is_empty()
+        || !std::path::Path::new(&project_name)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err("Invalid project name".to_string());
+    }
+
+    let project_path = match Project::list_projects() {
+        Ok(projects) => projects
+            .into_iter()
+            .find(|p| p.name == project_name)
+            .map(|p| p.path)
+            .unwrap_or_else(|| get_projects_dir(&app).join(&project_name)),
+        Err(_) => get_projects_dir(&app).join(&project_name),
+    };
 
     if !project_path.exists() {
         return Err(format!("Project '{}' not found", project_name));
