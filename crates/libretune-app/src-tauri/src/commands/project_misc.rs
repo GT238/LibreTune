@@ -2,6 +2,7 @@
 
 use crate::paths::get_projects_dir;
 use crate::state::AppState;
+use libretune_core::project::Project;
 use libretune_core::tune::TuneFile;
 
 /// Get info about an MSQ file without fully loading it (for the open dialog preview)
@@ -83,8 +84,21 @@ pub async fn delete_project(
     state: tauri::State<'_, AppState>,
     project_name: String,
 ) -> Result<(), String> {
-    let projects_dir = get_projects_dir(&app);
-    let project_path = projects_dir.join(&project_name);
+    // Resolve the project by the name it records, not by assuming its directory
+    // is named after it. `Project::create` sanitises the display name for the
+    // filesystem, and a project directory can be copied or renamed on disk, so
+    // the folder name and `project.json`'s `name` are not always equal.
+    // `list_projects` already reports both, and the UI lists projects from it,
+    // so resolving through it deletes exactly what the user selected.
+    //
+    // Fall back to the old name-joined path if the project is not in the list
+    // (e.g. an unreadable `project.json`), preserving the previous behaviour.
+    let project_path = Project::list_projects()
+        .map_err(|e| format!("Failed to list projects: {}", e))?
+        .into_iter()
+        .find(|p| p.name == project_name)
+        .map(|p| p.path)
+        .unwrap_or_else(|| get_projects_dir(&app).join(&project_name));
 
     if !project_path.exists() {
         return Err(format!("Project '{}' not found", project_name));
