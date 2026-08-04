@@ -442,27 +442,28 @@ impl TuneFile {
                 trimmed
             };
 
-            // If it was quoted, it's definitely a string (unless it's a boolean or number)
-            // But we still need to handle arrays that might be quoted
+            // A quoted value in an MSQ is an option label, never a scalar.
+            //
+            // TunerStudio writes scalar constants unquoted (`<constant
+            // name="reqFuel">12.6</constant>`) and `bits` constants quoted with
+            // the selected option's label (`<constant
+            // name="iacChannels">"1"</constant>`). Numeric-looking labels are
+            // common: `iacChannels` is `["1", "2"]` and `idleAdvDelay` is
+            // `["0.0", "0.5", "1.0", ...]`.
+            //
+            // Coercing those to `TuneValue::Scalar` made consumers treat the
+            // label as a raw bit index: `apply_tune`'s bits path uses a `Scalar`
+            // directly as the index but resolves a `String` through
+            // `bit_options`. So `"1"` on `["1", "2"]` selected option 1 ("2")
+            // instead of option 0 ("1"), and `"1.0"` on `idleAdvDelay` selected
+            // "0.5". It also round-tripped as a bare number on save, dropping
+            // the quotes and corrupting the file for TunerStudio too.
+            //
+            // Keep quoted values as strings so the bit_options lookup applies.
             if was_quoted {
-                // Quoted strings: check for boolean first, then try to parse as number
-                // If it fails, it's a string
                 if unquoted == "true" || unquoted == "false" {
                     return TuneValue::Bool(unquoted == "true");
                 }
-                if let Ok(val) = unquoted.parse::<f64>() {
-                    // Quoted number - could be a string representation of a number
-                    // But for bits constants, we want to preserve it as a string if it's not a pure number
-                    // Check if it's a pure number (no letters, just digits and maybe decimal point)
-                    if unquoted
-                        .chars()
-                        .all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == '+')
-                    {
-                        return TuneValue::Scalar(val);
-                    }
-                    // Otherwise treat as string (e.g., "1" in a bits context might be a label)
-                }
-                // Quoted string that's not a boolean or pure number - keep as string
                 return TuneValue::String(unquoted.to_string());
             }
 
@@ -1329,5 +1330,73 @@ mod tests {
 
         // Cleanup
         let _ = std::fs::remove_file(&temp_path);
+    }
+
+    #[test]
+    fn test_quoted_numeric_bits_values_stay_strings() {
+        // Quoted MSQ values are `bits` option labels, not scalars. Coercing a
+        // numeric-looking label to Scalar makes the bits path treat it as a raw
+        // index: "1" on ["1","2"] would select option 1 ("2") instead of option
+        // 0 ("1"), and "1.0" on ["0.0","0.5","1.0",...] would select "0.5".
+        let msq_content = r#"<?xml version="1.0" encoding="utf-8"?>
+<msq version="1.0">
+  <bibliography author="LibreTune Test" tuneComment="Test tune" writeDate="2026-01-07"/>
+  <versionInfo firmwareInfo="speeduino 202501"/>
+  <page number="0">
+    <constant name="iacChannels">"1"</constant>
+    <constant name="idleAdvDelay">"1.0"</constant>
+    <constant name="algorithm">"Speed Density"</constant>
+    <constant name="reqFuel">12.6</constant>
+    <constant name="flexEnabled">"true"</constant>
+  </page>
+</msq>"#;
+
+        let temp_path = std::env::temp_dir().join("test_quoted_bits.msq");
+        std::fs::write(&temp_path, msq_content).expect("Failed to write temp file");
+
+        let tune = TuneFile::load(&temp_path).expect("Failed to parse MSQ");
+
+        // Numeric-looking labels must remain strings so bit_options resolves them.
+        for (name, expected) in [("iacChannels", "1"), ("idleAdvDelay", "1.0")] {
+            match tune.get_constant(name) {
+                Some(TuneValue::String(s)) => assert_eq!(s.as_str(), expected),
+                other => panic!(
+                    "{} should be String({:?}) so the bits lookup applies, got: {:?}",
+                    name, expected, other
+                ),
+            }
+        }
+
+        // Non-numeric quoted labels keep working.
+        match tune.get_constant("algorithm") {
+            Some(TuneValue::String(s)) => assert_eq!(s.as_str(), "Speed Density"),
+            other => panic!("algorithm should be String, got: {:?}", other),
+        }
+
+        // Unquoted numbers are still scalars.
+        match tune.get_constant("reqFuel") {
+            Some(TuneValue::Scalar(v)) => assert_eq!(*v, 12.6),
+            other => panic!("reqFuel should be Scalar, got: {:?}", other),
+        }
+
+        // Quoted booleans are still booleans.
+        match tune.get_constant("flexEnabled") {
+            Some(TuneValue::Bool(b)) => assert!(*b),
+            other => panic!("flexEnabled should be Bool, got: {:?}", other),
+        }
+
+        // And the labels must survive a save round-trip with their quotes, so
+        // the file stays valid for TunerStudio.
+        let out_path = std::env::temp_dir().join("test_quoted_bits_roundtrip.msq");
+        tune.save(&out_path).expect("Failed to save MSQ");
+        let written = std::fs::read_to_string(&out_path).expect("Failed to read saved MSQ");
+        assert!(
+            written.contains(r#""1.0""#),
+            "idleAdvDelay label lost its quotes on save: {}",
+            written
+        );
+
+        let _ = std::fs::remove_file(&temp_path);
+        let _ = std::fs::remove_file(&out_path);
     }
 }
