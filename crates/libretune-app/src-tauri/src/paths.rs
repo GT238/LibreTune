@@ -17,8 +17,19 @@ pub fn get_app_data_dir(app: &tauri::AppHandle) -> PathBuf {
 }
 
 /// Get the projects directory (cross-platform).
+///
+/// Projects are created and imported by `libretune-core`, which resolves this
+/// location via [`Project::projects_dir`] (`~/Documents/LibreTuneProjects`).
+/// Defer to that same function so the app and core cannot disagree about where
+/// projects live — this previously returned `<app_data_dir>/projects`, a
+/// directory no code path ever creates, which made `delete_project` fail with
+/// "Project not found" for every project.
+///
+/// Falls back to the app data dir only if the core lookup fails (e.g. no home
+/// directory can be determined), preserving the previous behaviour as a last
+/// resort.
 pub fn get_projects_dir(app: &tauri::AppHandle) -> PathBuf {
-    get_app_data_dir(app).join("projects")
+    Project::projects_dir().unwrap_or_else(|_| get_app_data_dir(app).join("projects"))
 }
 
 /// Get the definitions directory (cross-platform).
