@@ -613,7 +613,15 @@ fn set_gauge_property(gauge: &mut GaugeConfig, prop: &str, value: &str) {
                 Some(value.to_string())
             }
         }
-        "ShowHistory" => gauge.show_history = value.parse().unwrap_or(false),
+        // `ShowHistory` is TunerStudio's peak-hold flag; the format has no
+        // separate `PeakHold` property. Drive `peak_hold` from it so an
+        // imported cluster keeps the peak markers it was authored with.
+        // `show_history` retains the raw parsed value.
+        "ShowHistory" => {
+            let show_history = value.parse().unwrap_or(false);
+            gauge.show_history = show_history;
+            gauge.peak_hold = show_history;
+        }
         "HistoryValue" => gauge.history_value = value.parse().unwrap_or(0.0),
         "HistoryDelay" => gauge.history_delay = value.parse().unwrap_or(15000),
         "NeedleSmoothing" => gauge.needle_smoothing = value.parse().unwrap_or(1),
@@ -749,6 +757,93 @@ mod tests {
             assert_eq!(gauge.gauge_painter, GaugePainter::AnalogGauge);
         } else {
             panic!("Expected Gauge component");
+        }
+    }
+
+    /// TunerStudio stores the peak-hold flag as `ShowHistory`; the `.dash`
+    /// format has no `PeakHold` property. Parsing must drive `peak_hold` from
+    /// it, otherwise every imported cluster loses the peak markers it was
+    /// authored with (404 of the gauges TunerStudio itself ships set it).
+    #[test]
+    fn test_show_history_drives_peak_hold() {
+        let dash_with = |show_history: &str| {
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<dsh xmlns="http://www.EFIAnalytics.com/:dsh">
+    <bibliography author="Test" company="TestCo" writeDate="2025-01-01"/>
+    <versionInfo fileFormat="3.0" firmwareSignature="speeduino"/>
+    <gaugeCluster antiAliasing="true" clusterBackgroundColor="-16777216">
+        <dashComp type="Gauge">
+            <Title type="String">RPM</Title>
+            <OutputChannel type="String">rpm</OutputChannel>
+            <GaugePainter type="GaugePainter">Analog Gauge</GaugePainter>
+            <ShowHistory type="boolean">{show_history}</ShowHistory>
+        </dashComp>
+    </gaugeCluster>
+</dsh>"#
+            )
+        };
+
+        let gauge_from = |xml: &str| {
+            let mut dash = parse_dash_file(xml).expect("parse");
+            match dash.gauge_cluster.components.remove(0) {
+                DashComponent::Gauge(g) => *g,
+                _ => panic!("Expected Gauge component"),
+            }
+        };
+
+        let enabled = gauge_from(&dash_with("true"));
+        assert!(
+            enabled.peak_hold,
+            "ShowHistory=true must enable peak_hold, otherwise the renderer never draws the marker"
+        );
+        assert!(enabled.show_history, "raw value retained for round-trip");
+
+        let disabled = gauge_from(&dash_with("false"));
+        assert!(
+            !disabled.peak_hold,
+            "ShowHistory=false must not enable peak_hold"
+        );
+    }
+
+    /// A cluster edited in LibreTune must write the user's peak-hold choice
+    /// back as `ShowHistory`, so it survives a round-trip through TunerStudio.
+    #[test]
+    fn test_peak_hold_round_trips_as_show_history() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<dsh xmlns="http://www.EFIAnalytics.com/:dsh">
+    <bibliography author="Test" company="TestCo" writeDate="2025-01-01"/>
+    <versionInfo fileFormat="3.0" firmwareSignature="speeduino"/>
+    <gaugeCluster antiAliasing="true" clusterBackgroundColor="-16777216">
+        <dashComp type="Gauge">
+            <Title type="String">RPM</Title>
+            <OutputChannel type="String">rpm</OutputChannel>
+            <GaugePainter type="GaugePainter">Analog Gauge</GaugePainter>
+            <ShowHistory type="boolean">false</ShowHistory>
+        </dashComp>
+    </gaugeCluster>
+</dsh>"#;
+
+        // Simulate the designer's peak-hold checkbox being ticked.
+        let mut dash = parse_dash_file(xml).expect("parse");
+        match dash.gauge_cluster.components[0] {
+            DashComponent::Gauge(ref mut g) => g.peak_hold = true,
+            _ => panic!("Expected Gauge component"),
+        }
+
+        let written = crate::dash::writer::write_dash_file(&dash).expect("write");
+        assert!(
+            written.contains("<ShowHistory type=\"boolean\">true</ShowHistory>"),
+            "peak_hold=true must serialise as ShowHistory=true, got:\n{written}"
+        );
+
+        let mut reparsed = parse_dash_file(&written).expect("reparse");
+        match reparsed.gauge_cluster.components.remove(0) {
+            DashComponent::Gauge(g) => assert!(
+                g.peak_hold,
+                "peak_hold must survive a write/parse round-trip"
+            ),
+            _ => panic!("Expected Gauge component"),
         }
     }
 
