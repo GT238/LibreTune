@@ -149,7 +149,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         // Handle preprocessor directives (always processed regardless of condition)
         if let Some(stripped) = line.strip_prefix("#set ") {
             let symbol = stripped.trim().to_string();
-            eprintln!("[DEBUG] preprocessor: #set {}", symbol);
+            tracing::debug!("preprocessor: #set {}", symbol);
             ctx.defined_symbols.insert(symbol);
             i += 1;
             continue;
@@ -157,7 +157,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
 
         if let Some(stripped) = line.strip_prefix("#unset ") {
             let symbol = stripped.trim();
-            eprintln!("[DEBUG] preprocessor: #unset {}", symbol);
+            tracing::debug!("preprocessor: #unset {}", symbol);
             ctx.defined_symbols.remove(symbol);
             i += 1;
             continue;
@@ -166,7 +166,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         if let Some(stripped) = line.strip_prefix("#if ") {
             let symbol = stripped.trim();
             let is_defined = ctx.defined_symbols.contains(symbol);
-            eprintln!("[DEBUG] preprocessor: #if {} -> {}", symbol, is_defined);
+            tracing::debug!("preprocessor: #if {} -> {}", symbol, is_defined);
             condition_stack.push(is_defined);
             i += 1;
             continue;
@@ -174,10 +174,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
 
         if line == "#else" {
             if let Some(last) = condition_stack.last_mut() {
-                eprintln!(
-                    "[DEBUG] preprocessor: #else (was {}, now {})",
-                    *last, !*last
-                );
+                tracing::debug!("preprocessor: #else (was {}, now {})", *last, !*last);
                 *last = !*last;
             }
             i += 1;
@@ -185,7 +182,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         }
 
         if line == "#endif" {
-            eprintln!("[DEBUG] preprocessor: #endif");
+            tracing::debug!("preprocessor: #endif");
             condition_stack.pop();
             i += 1;
             continue;
@@ -294,9 +291,10 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
             });
 
             if !conditions.is_empty() && !conditions_pass {
-                eprintln!(
-                    "[DEBUG] ini: section [{}] suppressed by unmet condition(s): {:?}",
-                    name, conditions
+                tracing::debug!(
+                    "ini: section [{}] suppressed by unmet condition(s): {:?}",
+                    name,
+                    conditions
                 );
                 current_section = String::new();
                 i += 1;
@@ -782,7 +780,7 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
             def.signature_prefix = Some(value.trim_matches('"').to_string());
         }
         "querycommand" => {
-            eprintln!("[DEBUG] parse_megatune: queryCommand = {:?}", value);
+            tracing::debug!("parse_megatune: queryCommand = {:?}", value);
             def.query_command = value.trim_matches('"').to_string();
         }
         "versioninfo" => {
@@ -792,8 +790,8 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
             // Strip potential comments
             let clean_val = value.split(';').next().unwrap_or("").trim();
             def.protocol.delay_after_port_open = clean_val.parse().unwrap_or(0);
-            eprintln!(
-                "[DEBUG] parse_megatune: delayAfterPortOpen = {}",
+            tracing::debug!(
+                "parse_megatune: delayAfterPortOpen = {}",
                 def.protocol.delay_after_port_open
             );
         }
@@ -812,8 +810,8 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
         "ochblocksize" => {
             let clean_val = value.split(';').next().unwrap_or("").trim();
             def.protocol.och_block_size = clean_val.parse().unwrap_or(0);
-            eprintln!(
-                "[DEBUG] parse_megatune: ochBlockSize = {}",
+            tracing::debug!(
+                "parse_megatune: ochBlockSize = {}",
                 def.protocol.och_block_size
             );
         }
@@ -827,7 +825,7 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
 
 /// Parse [TunerStudio] section entries (INI section name - keep as-is)
 fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
-    eprintln!("[DEBUG] parse_ts: key = {:?}, value = {:?}", key, value);
+    tracing::debug!("parse_ts: key = {:?}, value = {:?}", key, value);
     match key.to_lowercase().as_str() {
         "signature" => {
             def.signature = value.trim_matches('"').to_string();
@@ -884,8 +882,8 @@ fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
         "delayafterportopen" => {
             let clean_val = value.split(';').next().unwrap_or("").trim();
             def.protocol.delay_after_port_open = clean_val.parse().unwrap_or(0);
-            eprintln!(
-                "[DEBUG] parse_ts: delayAfterPortOpen = {}",
+            tracing::debug!(
+                "parse_ts: delayAfterPortOpen = {}",
                 def.protocol.delay_after_port_open
             );
         }
@@ -899,34 +897,31 @@ fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
         }
         "messageenvelopeformat" => {
             def.protocol.message_envelope_format = Some(value.trim_matches('"').to_string());
-            eprintln!(
-                "[DEBUG] parse_ts: messageEnvelopeFormat = {:?}",
+            tracing::debug!(
+                "parse_ts: messageEnvelopeFormat = {:?}",
                 def.protocol.message_envelope_format
             );
         }
         "maxunusedruntimerange" => {
             let clean_val = value.split(';').next().unwrap_or("").trim();
             def.protocol.max_unused_runtime_range = clean_val.parse().unwrap_or(0);
-            eprintln!(
-                "[DEBUG] parse_ts: maxUnusedRuntimeRange = {}",
+            tracing::debug!(
+                "parse_ts: maxUnusedRuntimeRange = {}",
                 def.protocol.max_unused_runtime_range
             );
         }
         "ochgetcommand" => {
             let clean_val = value.split(';').next().unwrap_or("").trim();
             def.protocol.och_get_command = Some(clean_val.trim_matches('"').to_string());
-            eprintln!(
-                "[DEBUG] parse_ts: ochGetCommand = {:?}",
+            tracing::debug!(
+                "parse_ts: ochGetCommand = {:?}",
                 def.protocol.och_get_command
             );
         }
         "ochblocksize" => {
             let clean_val = value.split(';').next().unwrap_or("").trim();
             def.protocol.och_block_size = clean_val.parse().unwrap_or(0);
-            eprintln!(
-                "[DEBUG] parse_ts: ochBlockSize = {}",
-                def.protocol.och_block_size
-            );
+            tracing::debug!("parse_ts: ochBlockSize = {}", def.protocol.och_block_size);
         }
         _ => {}
     }
@@ -960,8 +955,8 @@ fn parse_constants_entry(
         }
         "maxunusedruntimerange" => {
             def.protocol.max_unused_runtime_range = value.parse().unwrap_or(0);
-            eprintln!(
-                "[DEBUG] parse_constants: maxUnusedRuntimeRange = {}",
+            tracing::debug!(
+                "parse_constants: maxUnusedRuntimeRange = {}",
                 def.protocol.max_unused_runtime_range
             );
             return;
@@ -1269,16 +1264,13 @@ fn parse_burst_mode_entry(def: &mut EcuDefinition, key: &str, value: &str) {
         def.protocol.burst_get_command = Some(value.trim_matches('"').to_string());
     } else if key.eq_ignore_ascii_case("ochgetcommand") {
         let clean = value.trim_matches('"').to_string();
-        eprintln!(
-            "[DEBUG] parse_burst_mode_entry: ochGetCommand = {:?}",
-            clean
-        );
+        tracing::debug!("parse_burst_mode_entry: ochGetCommand = {:?}", clean);
         def.protocol.och_get_command = Some(clean);
     } else if key.eq_ignore_ascii_case("ochblocksize") {
         let clean = value.split(';').next().unwrap_or("").trim();
         def.protocol.och_block_size = clean.parse().unwrap_or(0);
-        eprintln!(
-            "[DEBUG] parse_burst_mode_entry: ochBlockSize = {}",
+        tracing::debug!(
+            "parse_burst_mode_entry: ochBlockSize = {}",
             def.protocol.och_block_size
         );
     }
