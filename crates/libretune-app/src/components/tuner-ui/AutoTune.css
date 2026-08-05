@@ -58,8 +58,20 @@
 
 .autotune-header h2 {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 16px;
   font-weight: 600;
+}
+
+.autotune-disconnected-badge {
+  background: var(--error);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: bold;
 }
 
 .autotune-table-selector {
