@@ -7,6 +7,7 @@ import { useChannels, useRealtimeStore } from '../../stores/realtimeStore';
 import { useGraphLogStore, exportGraphLogSetup, importGraphLogSetup } from '../../stores/graphLogStore';
 import LoggerStatsPanel from './LoggerStatsPanel';
 import GraphLog, { GraphSample } from './GraphLog';
+import { parseLogFile } from '../../utils/parseLogFile';
 import './DataLogView.css';
 
 /** Hard cap on samples kept in the frontend; the oldest are dropped beyond it. */
@@ -209,6 +210,9 @@ export const DataLogView: React.FC = () => {
   const [playbackPosition, setPlaybackPosition] = useState(0); // 0-1
   const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>(1);
   const [loadedFileName, setLoadedFileName] = useState<string | null>(null);
+  // Surfaced in the UI when a chosen log yields no rows — otherwise the Load
+  // button appears to do nothing.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [chartMode, setChartMode] = useState<'graphlog' | 'overlay'>('graphlog');
   const [selectedStatsChannel, setSelectedStatsChannel] = useState<string | null>(null);
@@ -470,88 +474,12 @@ export const DataLogView: React.FC = () => {
   // 4180 parser) — it handles quoted fields with embedded commas via the
   // inQuotes toggle below, but does not handle escaped quotes ("") or CRLF
   // inside quotes. Datalogs from both apps are simple enough that this suffices.
-  const parseLogCsv = useCallback((content: string, _fileName: string): { 
-    data: { x: number; values: Record<string, number> }[];
-    channels: string[];
-  } => {
-    const lines = content.trim().split('\n');
-    if (lines.length < 2) return { data: [], channels: [] };
-    
-    // Parse header - handle both formats
-    const headerLine = lines[0];
-    const headers = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-    
-    // Detect format: TunerStudio uses "Time" column, LibreTune uses "timestamp_ms"
-    const timeColIndex = headers.findIndex(h => 
-      h.toLowerCase() === 'time' || 
-      h.toLowerCase() === 'timestamp_ms' ||
-      h.toLowerCase() === 'timestamp'
-    );
-    
-    // Distinguishes the two formats so the timestamp can be unit-normalized.
-    const isTunerStudioFormat = headers.some(h => h.toLowerCase() === 'time');
-    const channels = headers.filter((_, i) => i !== timeColIndex);
-    
-    const data: { x: number; values: Record<string, number> }[] = [];
-    
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      
-      // Minimal quoted-CSV state machine: toggle inQuotes on each '"' so that
-      // commas inside quoted fields don't split the field. Anything else is
-      // accumulated into the current field.
-      const values: string[] = [];
-      let current = '';
-      let inQuotes = false;
-      for (const char of line) {
-        if (char === '"') {
-          inQuotes = !inQuotes;
-        } else if (char === ',' && !inQuotes) {
-          values.push(current.trim());
-          current = '';
-        } else {
-          current += char;
-        }
-      }
-      values.push(current.trim());
-      
-      if (values.length < headers.length) continue;
-      
-      // Parse timestamp, normalizing both formats to milliseconds.
-      let timestamp: number;
-      if (timeColIndex >= 0) {
-        const timeStr = values[timeColIndex];
-        if (isTunerStudioFormat) {
-          // TunerStudio format: seconds with decimals
-          timestamp = parseFloat(timeStr) * 1000;
-        } else {
-          // LibreTune format: milliseconds
-          timestamp = parseFloat(timeStr);
-        }
-      } else {
-        // No time column - use index * 100ms
-        timestamp = (i - 1) * 100;
-      }
-      
-      if (isNaN(timestamp)) continue;
-      
-      const entry: Record<string, number> = {};
-      let channelIdx = 0;
-      for (let j = 0; j < headers.length; j++) {
-        if (j === timeColIndex) continue;
-        const val = parseFloat(values[j]);
-        if (!isNaN(val)) {
-          entry[channels[channelIdx]] = val;
-        }
-        channelIdx++;
-      }
-      
-      data.push({ x: timestamp, values: entry });
-    }
-    
-    return { data, channels };
-  }, []);
+  // Parsing lives in `utils/parseLogFile` so it can be unit-tested against
+  // real .msl and .csv fixtures without mounting this component.
+  const parseLogCsv = useCallback(
+    (content: string, _fileName: string) => parseLogFile(content),
+    []
+  );
   
   const handleLoadLog = useCallback(async () => {
     try {
@@ -571,9 +499,16 @@ export const DataLogView: React.FC = () => {
       const { data, channels } = parseLogCsv(content, fileName);
       
       if (data.length === 0) {
+        // Previously this only reached the console, so picking an unreadable
+        // log looked like the button had done nothing at all.
         console.error('No valid data found in log file');
+        setLoadError(
+          `Could not read any data from "${fileName}". ` +
+          `Supported formats are TunerStudio .msl and comma-separated .csv logs.`
+        );
         return;
       }
+      setLoadError(null);
       
       // Switch to playback mode
       setLogData(data);
@@ -703,6 +638,11 @@ export const DataLogView: React.FC = () => {
           {loadedFileName && (
             <span className="loaded-file" title={loadedFileName}>
               {loadedFileName.length > 25 ? '...' + loadedFileName.slice(-22) : loadedFileName}
+            </span>
+          )}
+          {loadError && (
+            <span className="load-error" role="alert" title={loadError}>
+              {loadError}
             </span>
           )}
         </div>
