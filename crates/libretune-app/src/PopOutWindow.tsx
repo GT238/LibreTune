@@ -414,6 +414,7 @@ export default function PopOutWindow() {
           <AutoTune
             tableName={(popOutData.data as string) || ''}
             onClose={handleClose}
+            isConnected={isConnected}
           />
         );
       
