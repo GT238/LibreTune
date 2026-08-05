@@ -613,14 +613,11 @@ fn set_gauge_property(gauge: &mut GaugeConfig, prop: &str, value: &str) {
                 Some(value.to_string())
             }
         }
-        // `ShowHistory` is TunerStudio's peak-hold flag; the format has no
-        // separate `PeakHold` property. Drive `peak_hold` from it so an
-        // imported cluster keeps the peak markers it was authored with.
-        // `show_history` retains the raw parsed value.
+        // `ShowHistory` is TunerStudio's peak-hold flag; the `.dash` format
+        // has no separate `PeakHold` property, so drive `peak_hold` from it
+        // to keep the peak markers an imported cluster was authored with.
         "ShowHistory" => {
-            let show_history = value.parse().unwrap_or(false);
-            gauge.show_history = show_history;
-            gauge.peak_hold = show_history;
+            gauge.peak_hold = value.parse().unwrap_or(false);
         }
         "HistoryValue" => gauge.history_value = value.parse().unwrap_or(0.0),
         "HistoryDelay" => gauge.history_delay = value.parse().unwrap_or(15000),
@@ -797,7 +794,6 @@ mod tests {
             enabled.peak_hold,
             "ShowHistory=true must enable peak_hold, otherwise the renderer never draws the marker"
         );
-        assert!(enabled.show_history, "raw value retained for round-trip");
 
         let disabled = gauge_from(&dash_with("false"));
         assert!(

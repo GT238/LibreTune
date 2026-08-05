@@ -82,7 +82,7 @@ export function toTsGaugeConfig(gauge: SimpleGaugeInfo): TsGaugeConfig {
     antialiasing_on: true,
     background_image_file_name: null,
     needle_image_file_name: null,
-    show_history: false,
+    peak_hold: false,
     history_value: 0,
     history_delay: 0,
     needle_smoothing: 0,

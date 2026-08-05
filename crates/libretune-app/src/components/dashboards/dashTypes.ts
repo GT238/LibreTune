@@ -201,7 +201,6 @@ export interface TsGaugeConfig {
   needle_pivot_offset_y?: number;
 
   // History/tracking
-  show_history: boolean;
   history_value: number;
   history_delay: number;
   needle_smoothing: number;
@@ -217,7 +216,7 @@ export interface TsGaugeConfig {
   /** Optional INI expression that hides this gauge when false. */
   enabled_condition?: string | null;
   /** Render a persistent peak-hold marker tracking the maximum observed value. */
-  peak_hold?: boolean;
+  peak_hold: boolean;
   /** Hysteresis (in channel units) on warning/critical state transitions. */
   hysteresis?: number | null;
   /** Catch-all for un-modeled `.dash` attributes (round-trip safety). */
