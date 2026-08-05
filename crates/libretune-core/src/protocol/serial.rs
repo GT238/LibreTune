@@ -139,22 +139,16 @@ pub fn configure_port(port: &mut dyn SerialPort) -> Result<(), ProtocolError> {
     // Opening a serial port typically toggles DTR which triggers bootloader reset
     // Keeping DTR asserted prevents this and maintains stable connection
     if let Err(e) = port.write_data_terminal_ready(true) {
-        eprintln!(
-            "[DEBUG] configure_port: failed to set DTR high: {} (continuing)",
-            e
-        );
+        tracing::debug!("configure_port: failed to set DTR high: {} (continuing)", e);
     } else {
-        eprintln!("[DEBUG] configure_port: DTR set high");
+        tracing::debug!("configure_port: DTR set high");
     }
 
     // Set RTS high for proper flow control signaling
     if let Err(e) = port.write_request_to_send(true) {
-        eprintln!(
-            "[DEBUG] configure_port: failed to set RTS high: {} (continuing)",
-            e
-        );
+        tracing::debug!("configure_port: failed to set RTS high: {} (continuing)", e);
     } else {
-        eprintln!("[DEBUG] configure_port: RTS set high");
+        tracing::debug!("configure_port: RTS set high");
     }
 
     Ok(())

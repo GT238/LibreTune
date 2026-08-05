@@ -770,9 +770,10 @@ impl TuneFile {
             }
         }
 
-        eprintln!(
-            "[DEBUG] parse_msq: Extracted {} constants and {} pcVariables from MSQ file",
-            constants_found, pcvars_found
+        tracing::debug!(
+            "parse_msq: Extracted {} constants and {} pcVariables from MSQ file",
+            constants_found,
+            pcvars_found
         );
 
         // If we found no constants and no signature, this isn't a valid MSQ
