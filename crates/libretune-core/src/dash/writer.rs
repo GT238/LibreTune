@@ -319,7 +319,11 @@ fn write_gauge_component<W: Write>(
         write_string_property(writer, "NeedleImageFileName", "null")?;
     }
 
-    write_boolean_property(writer, "ShowHistory", gauge.show_history)?;
+    // Written from `peak_hold`, which is what the designer edits and what the
+    // renderer consults; `ShowHistory` is TunerStudio's name for the same
+    // flag, so a cluster edited here opens in TunerStudio with the peak
+    // markers the user actually set.
+    write_boolean_property(writer, "ShowHistory", gauge.peak_hold)?;
     write_double_property(writer, "HistoryValue", gauge.history_value)?;
     write_int_property(writer, "HistoryDelay", gauge.history_delay)?;
     write_int_property(writer, "NeedleSmoothing", gauge.needle_smoothing)?;

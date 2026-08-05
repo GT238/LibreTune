@@ -453,7 +453,8 @@ pub struct GaugeConfig {
     #[serde(default)]
     pub enabled_condition: Option<String>,
     /// Render a persistent peak-hold marker tracking the maximum observed
-    /// value (TS `peakHold`).
+    /// value. Serialised to and from TunerStudio's `ShowHistory` property —
+    /// the `.dash` format has no `PeakHold` of its own.
     #[serde(default)]
     pub peak_hold: bool,
     /// Hysteresis (in channel units) applied to warning/critical state
