@@ -692,7 +692,6 @@ pub fn create_tuning_dashboard() -> DashFile {
             trim_color: LT_TEXT_SECONDARY,
             warn_color: LT_WARN_COLOR,
             critical_color: LT_CRITICAL_COLOR,
-            show_history: true,
             ..Default::default()
         })));
 
@@ -1014,7 +1013,6 @@ fn log_sparkline(spec: LogSparkSpec) -> DashComponent {
         trim_color: LT_LOG_GRAY,
         warn_color: LT_WARN_COLOR,
         critical_color: LT_CRITICAL_COLOR,
-        show_history: true,
         border_width: 1,
         shortest_size: 0, // see log_stat_tile's comment
         ..Default::default()

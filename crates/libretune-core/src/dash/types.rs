@@ -435,7 +435,6 @@ pub struct GaugeConfig {
     pub needle_image_offset_y: Option<f64>,
 
     // History/tracking
-    pub show_history: bool,
     pub history_value: f64,
     pub history_delay: i32,
     pub needle_smoothing: i32,
@@ -545,7 +544,6 @@ impl Default for GaugeConfig {
             needle_pivot_offset_y: None,
             needle_image_offset_x: None,
             needle_image_offset_y: None,
-            show_history: false,
             history_value: 0.0,
             history_delay: 15000,
             needle_smoothing: 1,
