@@ -7,6 +7,8 @@
 # Or install as Git hook: ./scripts/pre-push.sh --install-hook
 
 set -e  # Exit on first error
+set -o pipefail  # A failing command upstream of a pipe (e.g. `cargo build | tee log`)
+                 # must fail the pipeline, not be masked by tee/tail's own success
 
 # Ensure we're in the repository root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
