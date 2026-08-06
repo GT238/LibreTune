@@ -190,6 +190,11 @@ pub struct AppState {
     /// JoinHandle for the currently-running AI assistant turn (if any).
     /// Aborted by `agent_stop` to cancel an in-flight LLM request.
     pub agent_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Reserved for a future cancel-in-progress-build command; not yet
+    /// populated by commands/speeduino_build.rs's compile/upload commands,
+    /// which currently run to completion directly.
+    #[allow(dead_code)]
+    pub speeduino_build_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 #[derive(Clone, Debug)]

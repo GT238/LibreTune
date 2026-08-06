@@ -854,6 +854,7 @@ mod stale_definition_guard_tests {
             math_channels: Mutex::new(Vec::new()),
             stream_stats: Mutex::new(StreamStats::default()),
             agent_task: Mutex::new(None),
+            speeduino_build_task: Mutex::new(None),
         }
     }
 

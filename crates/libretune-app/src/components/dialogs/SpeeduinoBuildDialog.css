@@ -1,0 +1,102 @@
+.speeduino-build-dialog .speeduino-build-intro {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.speeduino-build-step {
+  margin-bottom: 16px;
+}
+
+.speeduino-build-step > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.speeduino-build-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.speeduino-build-status {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.speeduino-build-status.ok {
+  color: #6ee7a0;
+}
+
+.speeduino-build-status.missing {
+  color: #e8c070;
+}
+
+.speeduino-build-progress {
+  width: 100%;
+  margin-top: 8px;
+  height: 6px;
+}
+
+.speeduino-build-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.speeduino-build-port-select {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  color: inherit;
+  font-size: 13px;
+}
+
+.speeduino-build-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  background: rgba(255, 80, 80, 0.12);
+  border: 1px solid rgba(255, 80, 80, 0.25);
+  color: var(--error);
+}
+
+.speeduino-build-success {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  background: rgba(0, 200, 100, 0.12);
+  border: 1px solid rgba(0, 200, 100, 0.25);
+  color: #6ee7a0;
+}
+
+.speeduino-build-log {
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-default);
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.speeduino-build-log-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

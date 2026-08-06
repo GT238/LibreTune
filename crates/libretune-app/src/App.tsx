@@ -220,6 +220,7 @@ function AppContent() {
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
   const [burnDialogOpen, setBurnDialogOpen] = useState(false);
   const [firmwareUpdateDialogOpen, setFirmwareUpdateDialogOpen] = useState(false);
+  const [speeduinoBuildDialogOpen, setSpeeduinoBuildDialogOpen] = useState(false);
   const [newTuneDialogOpen, setNewTuneDialogOpen] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [mathChannelsDialogOpen, setMathChannelsDialogOpen] = useState(false);
@@ -1415,7 +1416,7 @@ function AppContent() {
     sidebarVisible, showEcuMenus: showEcuMenusInMenubar, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
     closeProject, handleCreateRestorePoint,
     setNewProjectDialogOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
-    setBurnDialogOpen, setFirmwareUpdateDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
+    setBurnDialogOpen, setFirmwareUpdateDialogOpen, setSpeeduinoBuildDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
     setMathChannelsDialogOpen, setBaseMapDialogOpen, setTableComparisonOpen,
     setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, agentPanelVisible, setAgentPanelVisible, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
@@ -1630,6 +1631,8 @@ function AppContent() {
         refreshTuneModified={refreshTuneModified}
         firmwareUpdateDialogOpen={firmwareUpdateDialogOpen}
         setFirmwareUpdateDialogOpen={setFirmwareUpdateDialogOpen}
+        speeduinoBuildDialogOpen={speeduinoBuildDialogOpen}
+        setSpeeduinoBuildDialogOpen={setSpeeduinoBuildDialogOpen}
         iniCapabilities={iniCapabilities}
         newTuneDialogOpen={newTuneDialogOpen}
         setNewTuneDialogOpen={setNewTuneDialogOpen}

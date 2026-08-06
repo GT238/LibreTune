@@ -47,6 +47,13 @@ pub fn get_dashboards_dir(app: &tauri::AppHandle) -> PathBuf {
     get_app_data_dir(app).join("dashboards")
 }
 
+/// Get the firmware-source-and-build-tools directory (cross-platform).
+/// Holds downloaded Speeduino firmware source, compiled build output, and the
+/// auto-fetched arduino-cli/avrdude toolchain binaries.
+pub fn get_firmware_source_dir(app: &tauri::AppHandle) -> PathBuf {
+    get_app_data_dir(app).join("firmware-source")
+}
+
 /// Project-relative path to the port editor JSON store.
 pub fn get_port_editor_store_path(project: &Project) -> PathBuf {
     project.path.join("projectCfg").join("port_editor.json")

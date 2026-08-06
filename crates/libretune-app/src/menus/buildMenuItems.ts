@@ -41,6 +41,7 @@ export interface BuildMenuItemsDeps {
   setBurnDialogOpen: (open: boolean) => void;
   refreshTuneModified?: () => void | Promise<void>;
   setFirmwareUpdateDialogOpen: (open: boolean) => void;
+  setSpeeduinoBuildDialogOpen: (open: boolean) => void;
   setRestorePointsOpen: (open: boolean) => void;
   setTuneHistoryOpen: (open: boolean) => void;
   setSettingsDialogOpen: (open: boolean) => void;
@@ -76,7 +77,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
     sidebarVisible, showEcuMenus, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
     closeProject, handleCreateRestorePoint,
     setNewProjectDialogOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
-    setBurnDialogOpen, setFirmwareUpdateDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
+    setBurnDialogOpen, setFirmwareUpdateDialogOpen, setSpeeduinoBuildDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
     setMathChannelsDialogOpen, setBaseMapDialogOpen, setTableComparisonOpen,
     setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, agentPanelVisible, setAgentPanelVisible, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
@@ -263,6 +264,14 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
         disabled: !currentProject || status.state !== "Connected",
       });
     }
+  }
+  if (ecuType === "Speeduino") {
+    toolItems.push({
+      id: "speeduino-build",
+      label: "Build & Flash Speeduino Firmware (PoC)",
+      onClick: () => setSpeeduinoBuildDialogOpen(true),
+      disabled: !currentProject,
+    });
   }
   if (toolItems.length > 0) toolItems.push({ id: "sep3", label: "", separator: true });
   toolItems.push({ id: "compare-tables", label: t('tools.tableCompare'), onClick: () => setTableComparisonOpen(true), disabled: !currentProject });

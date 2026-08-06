@@ -30,6 +30,7 @@ import OnboardingDialog from "./dialogs/OnboardingDialog";
 import { PluginPanel } from "./PluginPanel";
 import { ControllerCommandDialog } from "./console/ControllerCommandDialog";
 import { FirmwareUpdateDialog } from "./dialogs/FirmwareUpdateDialog";
+import { SpeeduinoBuildDialog } from "./dialogs/SpeeduinoBuildDialog";
 import { ThemeName } from "../themes";
 import {
   type ConnectionStatus,
@@ -64,6 +65,8 @@ export interface DialogOverlaysProps {
   refreshTuneModified?: () => void | Promise<void>;
   firmwareUpdateDialogOpen: boolean;
   setFirmwareUpdateDialogOpen: (v: boolean) => void;
+  speeduinoBuildDialogOpen: boolean;
+  setSpeeduinoBuildDialogOpen: (v: boolean) => void;
   iniCapabilities: IniCapabilities | null;
   newTuneDialogOpen: boolean;
   setNewTuneDialogOpen: (v: boolean) => void;
@@ -197,6 +200,7 @@ export function DialogOverlays(props: DialogOverlaysProps) {
     loadDialogOpen, setLoadDialogOpen,
     burnDialogOpen, setBurnDialogOpen, refreshTuneModified,
     firmwareUpdateDialogOpen, setFirmwareUpdateDialogOpen, iniCapabilities,
+    speeduinoBuildDialogOpen, setSpeeduinoBuildDialogOpen,
     newTuneDialogOpen, setNewTuneDialogOpen,
     settingsDialogOpen, setSettingsDialogOpen,
     setUnitsSystem, setAutoBurnOnClose, setStatus, setStatusBarChannels, setDefaultRuntimePacketMode,
@@ -253,6 +257,10 @@ export function DialogOverlays(props: DialogOverlaysProps) {
         onClose={() => setFirmwareUpdateDialogOpen(false)}
         isConnected={status.state === "Connected"}
         iniCapabilities={iniCapabilities}
+      />
+      <SpeeduinoBuildDialog
+        isOpen={speeduinoBuildDialogOpen}
+        onClose={() => setSpeeduinoBuildDialogOpen(false)}
       />
       <NewTuneDialog isOpen={newTuneDialogOpen} onClose={() => setNewTuneDialogOpen(false)} />
       <SettingsDialog

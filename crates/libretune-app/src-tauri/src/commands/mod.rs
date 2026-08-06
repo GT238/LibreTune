@@ -58,6 +58,7 @@ pub mod restore_points;
 pub mod save_tune;
 pub mod settings;
 pub mod signature_helpers;
+pub mod speeduino_build;
 pub mod start_autotune;
 pub mod sync_ecu_data;
 pub mod system;

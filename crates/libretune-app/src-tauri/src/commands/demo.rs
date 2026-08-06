@@ -225,6 +225,7 @@ mod demo_mode_tests {
             math_channels: Mutex::new(Vec::new()),
             stream_stats: Mutex::new(StreamStats::default()),
             agent_task: Mutex::new(None),
+            speeduino_build_task: Mutex::new(None),
         };
 
         let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

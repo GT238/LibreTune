@@ -143,6 +143,11 @@ use commands::save_tune::{save_tune, save_tune_as};
 use commands::settings::{
     get_settings, update_heatmap_custom_stops, update_setting, update_settings,
 };
+use commands::speeduino_build::{
+    check_latest_speeduino_release, compile_speeduino_firmware, download_arduino_cli,
+    download_speeduino_source, ensure_avr_core, get_speeduino_toolchain_info,
+    upload_speeduino_firmware,
+};
 use commands::start_autotune::start_autotune;
 use commands::sync_ecu_data::sync_ecu_data;
 use commands::system::{get_build_info, get_serial_ports};
@@ -216,6 +221,7 @@ pub fn run() {
             math_channels: Mutex::new(Vec::new()),
             stream_stats: Mutex::new(StreamStats::default()),
             agent_task: Mutex::new(None),
+            speeduino_build_task: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,
@@ -339,6 +345,13 @@ pub fn run() {
             update_ecu_firmware,
             recover_ecu_firmware_dfu,
             release_serial_port_blockers,
+            get_speeduino_toolchain_info,
+            download_arduino_cli,
+            ensure_avr_core,
+            check_latest_speeduino_release,
+            download_speeduino_source,
+            compile_speeduino_firmware,
+            upload_speeduino_firmware,
             use_project_tune,
             use_ecu_tune,
             mark_tune_modified,
