@@ -20,7 +20,9 @@
 //! without needing a running Tauri app, which this project doesn't have a
 //! test harness for yet.
 
+use crate::commands::metrics::stop_metrics_task;
 use crate::paths::get_firmware_source_dir;
+use crate::state::AppState;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -805,11 +807,37 @@ pub async fn compile_speeduino_firmware(
 #[tauri::command]
 pub async fn upload_speeduino_firmware(
     app: AppHandle,
+    state: tauri::State<'_, AppState>,
     sketch_path: String,
     port: String,
 ) -> Result<SpeeduinoBuildResult, String> {
+    // Release LibreTune's own tuning connection first -- if it's still
+    // holding the serial port open, avrdude/arduino-cli will fail to open
+    // it for flashing. Mirrors firmware_update.rs's update_ecu_firmware.
+    let mut log = Vec::new();
+    if state.connection.lock().await.is_some() {
+        push_log(
+            Some(&app),
+            &mut log,
+            "Releasing the active ECU connection before flashing…",
+        );
+        stop_metrics_task(state.clone()).await;
+        {
+            let mut task_guard = state.streaming_task.lock().await;
+            if let Some(handle) = task_guard.take() {
+                handle.abort();
+            }
+        }
+        *state.connection.lock().await = None;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
     let base_dir = get_firmware_source_dir(&app);
-    upload_speeduino_firmware_impl(&base_dir, Some(&app), &sketch_path, &port).await
+    let mut result =
+        upload_speeduino_firmware_impl(&base_dir, Some(&app), &sketch_path, &port).await?;
+    log.append(&mut result.log);
+    result.log = log;
+    Ok(result)
 }
 
 #[cfg(test)]
